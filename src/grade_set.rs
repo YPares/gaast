@@ -41,7 +41,8 @@ impl GradeSet {
     pub fn prj(self, grades: Self) -> Self {
         GradeSet(self.0 & grades.0)
     }
-    pub fn grades(&self) -> impl Iterator<Item = usize> + '_ {
+    /// Iterate over each grade present in the GradeSet
+    pub fn iter_grades(&self) -> impl Iterator<Item = usize> + '_ {
         self.0
             .iter()
             .enumerate()
@@ -92,6 +93,18 @@ impl std::ops::Mul for GradeSet {
     }
 }
 
+/// The trait for all objects that are graded
+pub trait Graded {
+    /// Get the GradeSet of the object
+    fn grade_set(&self) -> GradeSet;
+}
+
+impl Graded for f64 {
+    fn grade_set(&self) -> GradeSet {
+        GradeSet::g(0)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -126,6 +139,6 @@ mod test {
         mul_vec_rotor: G(1) * (G(0) + G(2)) => G(1) + G(3),
         range: GradeSet::range(4,6) => G(4) + G(5) + G(6),
         project: GradeSet::range(0,10).prj(GradeSet::range(4,6)) => GradeSet::range(4,6),
-        iter_grades: (G(1) + G(22) + G(10)).grades().collect::<Vec<usize>>() => vec![1,10,22]
+        iter_grades: (G(1) + G(22) + G(10)).iter_grades().collect::<Vec<_>>() => vec![1,10,22]
     );
 }
