@@ -1,19 +1,50 @@
-#[derive(Debug)]
-pub struct GradeSet(Vec<bool>);
+use bitvec::prelude::*;
 
-impl GradeSet {
-    pub fn g_null() -> Self {
-        GradeSet(Vec::new())
-    }
-    pub fn g(x: usize) -> Self {
-        let mut v = vec![false; x + 1];
-        v[x] = true;
-        GradeSet(v)
+/// Represents the set of grades that can be contained in some multivector
+#[derive(Debug, Eq, Clone)]
+pub struct GradeSet(BitVec);
+
+impl PartialEq for GradeSet {
+    /// Allows equality if bitvecs are not of the same length. Tests if they are
+    /// equal up to some trailing zeroes
+    fn eq(&self, other: &Self) -> bool {
+        let (small, big) = sort_by_len(&self.0, &other.0);
+        big[0..small.len()] == &small[..] && big[small.len()..].not_any()
     }
 }
 
-fn sort_vecs(GradeSet(v1): GradeSet, GradeSet(v2): GradeSet) -> (Vec<bool>, Vec<bool>) {
-    if v1.len() <= v2.len() {
+impl GradeSet {
+    /// The grade of zero. (In GA, zero is polymorphic: it's a scalar, a vector,
+    /// a bivector etc. at the same time)
+    pub fn g_any() -> Self {
+        GradeSet(BitVec::new())
+    }
+    /// The grade of a k-vector
+    pub fn g(k: usize) -> Self {
+        let mut v = bitvec![0; k + 1];
+        v.set(k, true);
+        GradeSet(v)
+    }
+    /// Grades ranging from x to y (incl)
+    pub fn range(x: usize, y: usize) -> Self {
+        let mut v = bitvec![0; y + 1];
+        for mut i in &mut v.as_mut_bitslice()[x..=y] {
+            *i = true;
+        }
+        GradeSet(v)
+    }
+    /// Grade projection: select part of the grades contained in self, using
+    /// another GradeSet as a selector
+    pub fn prj(self, grades: Self) -> Self {
+        GradeSet(self.0 & grades.0)
+    }
+}
+
+fn sort_by_len<T>(v1: T, v2: T) -> (T, T)
+where
+    T: std::borrow::Borrow<BitVec>,
+{
+    if v1.borrow().len() <= v2.borrow().len() {
         (v1, v2)
     } else {
         (v2, v1)
@@ -23,30 +54,68 @@ fn sort_vecs(GradeSet(v1): GradeSet, GradeSet(v2): GradeSet) -> (Vec<bool>, Vec<
 impl std::ops::Add for GradeSet {
     type Output = Self;
     fn add(self, rhs: Self) -> Self::Output {
-        let (small, mut big) = sort_vecs(self, rhs);
-        for i in 0..small.len() {
-            big[i] = big[i] || small[i];
-        }
-        GradeSet(big)
+        let (small, big) = sort_by_len(self.0, rhs.0);
+        GradeSet(big | small)
     }
 }
 
 impl std::ops::Mul for GradeSet {
     type Output = Self;
     fn mul(self, rhs: Self) -> Self::Output {
-        let (small, big) = sort_vecs(self, rhs);
-        if small.len() == 0 { return GradeSet(small) };
-        let mut res = vec![false; big.len()];
-        for r in 0..res.len() {
-            for i in 0..small.len() {
-                for j in 0..big.len() {
-                    let m = (i as i32 - j as i32).abs();
-                    if i+j >= r && m <= r as i32 && m % 2 == r as i32 % 2 {
-                        res[r] = res[r] || (small[i] && big[j]);
+        let (small, big) = sort_by_len(self.0, rhs.0);
+        if small.len() == 0 {
+            GradeSet(small)
+        } else {
+            let mut res = bitvec![0; big.len() + small.len() - 1];
+            for r in 0..res.len() {
+                for i in 0..small.len() {
+                    for j in 0..big.len() {
+                        let m = (i as i32 - j as i32).abs();
+                        if i + j >= r && m <= r as i32 && m % 2 == r as i32 % 2 {
+                            let mut x = res.get_mut(r).unwrap();
+                            *x = *x || (small[i] && big[j]);
+                        }
                     }
                 }
             }
+            GradeSet(res)
         }
-        GradeSet(res)
     }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    const G: fn(usize) -> GradeSet = GradeSet::g;
+    const G_ANY: fn() -> GradeSet = GradeSet::g_any;
+
+    macro_rules! test_eqs {
+        ($($test_name:ident : $a:expr => $b:expr),*) => {
+            $(
+                #[test]
+                fn $test_name() {
+                    assert_eq!($a, $b);
+                }
+            )*
+        }
+    }
+
+    #[test]
+    fn test_neq() {
+        assert_ne!(G(3), G(4))
+    }
+
+    test_eqs!(
+        add_self_id: G(3) + G(3) => G(3),
+        add_g_any_id: G(3) + G_ANY() => G(3),
+        mul_g_any_absorb: G(3) * G_ANY() => G_ANY(),
+        mul_vecs: G(1) * G(1) => G(0) + G(2),
+        mul_scal_id: G(40) * G(0) => G(40),
+        mul_bivec_quadvec: G(2) * G(4) => G(2) + G(4) + G(6),
+        mul_trivec_pentavec: G(3) * G(5) => G(2) + G(4) + G(6) + G(8),
+        mul_trivec_quadvec: G(3) * G(4) => G(1) + G(3) + G(5) + G(7),
+        mul_vec_rot: G(1) * (G(0) + G(2)) => G(1) + G(3),
+        range: GradeSet::range(4,6) => G(4) + G(5) + G(6),
+        project: GradeSet::range(0,10).prj(GradeSet::range(4,6)) => GradeSet::range(4,6)
+    );
 }
