@@ -48,16 +48,37 @@ impl std::ops::Mul for GAExpr {
     }
 }
 
-/// Grade preserving operations
-macro_rules! pub_gpos {
-    ($($fn_name:ident : $ctor:ident)*) => {
+impl std::ops::Neg for GAExpr {
+    type Output = Self;
+    fn neg(self) -> Self::Output {
+        self * GAExpr::val(-1.0)
+    }
+}
+
+impl std::ops::Sub for GAExpr {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self::Output {
+        self + -rhs
+    }
+}
+
+macro_rules! grade_op {
+    ($_:ident, id) => {};
+    ($x:ident, $fn_name:ident) => {
+        $x.grade_set = $x.grade_set.$fn_name();
+    };
+}
+macro_rules! unary_ops {
+    ($($fn_name:ident $ctor:ident $grade_op:ident $doc:literal),*) => {
         $(
+            #[doc=$doc]
             pub fn $fn_name(mut self) -> Self {
+                grade_op!(self, $grade_op);
                 self.ast = Rc::new($ctor(self.ast));
                 self
             }
         )*
-    };
+    }
 }
 
 impl GAExpr {
@@ -69,7 +90,12 @@ impl GAExpr {
         }
     }
 
-    pub_gpos!(exp:Exp log:Log rev:Rev ginvol:GInvol);
+    unary_ops!(
+        rev Rev id "Reverse (dagger)",
+        ginvol GInvol id "Grade involution (main involution)",
+        exp Exp exp "Exponential. IMPORTANT: Is defined only for **single**-graded k-vectors that square to a scalar",
+        log Log log "Natural logarithm"
+    );
 
     /// Inverse
     pub fn inv(mut self) -> Self {
@@ -78,7 +104,7 @@ impl GAExpr {
             self.ast = Rc::new(ScalarInv(self.ast));
             self
         } else {
-            self.clone() * self.norm_sq().inv()
+            self.clone().rev() * self.norm_sq().inv()
         }
     }
 
@@ -88,8 +114,23 @@ impl GAExpr {
         self
     }
 
+    /// Scalar product
+    pub fn scal(self, rhs: Self) -> Self {
+        (self.rev() * rhs).prj(0)
+    }
+
     /// Norm squared
     pub fn norm_sq(self) -> Self {
-        (self.clone().rev() * self).prj(0)
+        self.clone().scal(self)
+    }
+
+    /// To some floating-point power
+    pub fn powf(self, p: f64) -> Self {
+        GAExpr::exp(GAExpr::log(self) * GAExpr::val(p))
+    }
+
+    /// Square root
+    pub fn sqrt(self) -> Self {
+        self.powf(0.5)
     }
 }

@@ -43,10 +43,29 @@ impl GradeSet {
     }
     /// Iterate over each grade present in the GradeSet
     pub fn iter_grades(&self) -> impl Iterator<Item = usize> + '_ {
-        self.0
-            .iter()
-            .enumerate()
-            .filter_map(|(i, n)| if *n { Some(i) } else { None })
+        self.0.iter_ones()
+    }
+
+    pub fn is_single_graded(&self) -> bool {
+        let mut iter = self.0.iter_ones();
+        if let None = iter.next() {
+            return false
+        }
+        for _ in iter {
+            return false
+        }
+        true
+    }
+
+    /// Exponential. IMPORTANT: Is defined only for **single**-graded k-vectors
+    /// *that square to a scalar*
+    pub fn exp(self) -> Self {
+        assert!(self.is_single_graded());
+        self + GradeSet::g(0)
+    }
+
+    pub fn log(self) -> Self {
+        self
     }
 }
 
@@ -106,7 +125,7 @@ impl Graded for f64 {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     const G: fn(usize) -> GradeSet = GradeSet::g;
     const G_ANY: fn() -> GradeSet = GradeSet::g_any;
@@ -123,7 +142,7 @@ mod test {
     }
 
     #[test]
-    fn test_neq() {
+    fn neq() {
         assert_ne!(G(3), G(4))
     }
 
@@ -139,6 +158,9 @@ mod test {
         mul_vec_rotor: G(1) * (G(0) + G(2)) => G(1) + G(3),
         range: GradeSet::range(4,6) => G(4) + G(5) + G(6),
         project: GradeSet::range(0,10).prj(GradeSet::range(4,6)) => GradeSet::range(4,6),
+        single_graded: (G(1) + G(1)).is_single_graded() => true,
+        not_single_graded: (G(1) + G(2)).is_single_graded() => false,
+        g_any_not_single_graded: G_ANY().is_single_graded() => false,
         iter_grades: (G(1) + G(22) + G(10)).iter_grades().collect::<Vec<_>>() => vec![1,10,22]
     );
 }
