@@ -1,7 +1,6 @@
 use super::grade_set::GradeSet;
 
-struct RawMV {
-    contents: Vec<f64>,
-    grade_set: GradeSet,
-    dim: usize
+pub struct RawMV {
+    pub contents: Vec<f64>,
+    pub grade_set: GradeSet
 }

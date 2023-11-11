@@ -1,3 +1,6 @@
+//! Represent the effect of geometric algebra primitives over the grades of the
+//! multivectors
+
 use bitvec::prelude::*;
 
 /// Represents the set of grades that can be contained in some multivector. Can
@@ -8,7 +11,7 @@ use bitvec::prelude::*;
 pub struct GradeSet(BitVec);
 
 impl PartialEq for GradeSet {
-    /// Allows equality if bitvecs are not of the same length. Tests if they are
+    /// Allows equality between bitvecs of different lengths: tests if they are
     /// equal up to some trailing zeroes
     fn eq(&self, other: &Self) -> bool {
         let (small, big) = sort_by_len(&self.0, &other.0);
@@ -21,13 +24,16 @@ impl GradeSet {
     /// a bivector etc. at the same time)
     pub fn g_any() -> Self {
         GradeSet(BitVec::new())
+        // A empty bitvec is just treated as a bitvec full of zeroes
     }
+
     /// The grade of a k-vector
     pub fn g(k: usize) -> Self {
         let mut v = bitvec![0; k + 1];
         v.set(k, true);
         GradeSet(v)
     }
+
     /// Grades ranging from x to y (incl)
     pub fn range(x: usize, y: usize) -> Self {
         let mut v = bitvec![0; y + 1];
@@ -36,36 +42,59 @@ impl GradeSet {
         }
         GradeSet(v)
     }
+
     /// Grade projection: select part of the grades contained in self, using
     /// another GradeSet as a selector
     pub fn prj(self, grades: Self) -> Self {
         GradeSet(self.0 & grades.0)
     }
+
     /// Iterate over each grade present in the GradeSet
     pub fn iter_grades(&self) -> impl Iterator<Item = usize> + '_ {
         self.0.iter_ones()
     }
-
+    
+    /// Whether the GradeSet contains exactly one grade
     pub fn is_single_graded(&self) -> bool {
         let mut iter = self.0.iter_ones();
         if let None = iter.next() {
-            return false
+            return false;
         }
         for _ in iter {
-            return false
+            return false;
         }
         true
     }
 
-    /// Exponential. IMPORTANT: Is defined only for **single**-graded k-vectors
-    /// *that square to a scalar*
-    pub fn exp(self) -> Self {
-        assert!(self.is_single_graded());
-        self + GradeSet::g(0)
+    /// Remove a grade from the set
+    pub fn rm_grade(mut self, k: usize) -> Self {
+        if k < self.0.len() {
+            self.0.set(k, false);
+        }
+        self
     }
 
-    pub fn log(self) -> Self {
+    pub(crate) fn id(self) -> Self {
         self
+    }
+
+    /// Exponential. Is defined only for **single**-graded k-vectors
+    pub fn exp(self) -> Self {
+        assert!(
+            self.is_single_graded(),
+            "exp cannot be used on a multivector, only k-vector"
+        );
+        GradeSet::g(0) + self
+    }
+
+    /// Logarithm. Is defined only for multivectors of the form \<A\>_0 + \<A\>_k
+    pub fn log(self) -> Self {
+        let other_grade = self.rm_grade(0);
+        assert!(
+            other_grade.is_single_graded(),
+            "log can only be used on multivectors of the form <A>_0 + <A>_k"
+        );
+        other_grade
     }
 }
 
@@ -109,18 +138,6 @@ impl std::ops::Mul for GradeSet {
             }
             GradeSet(res)
         }
-    }
-}
-
-/// The trait for all objects that are graded
-pub trait Graded {
-    /// Get the GradeSet of the object
-    fn grade_set(&self) -> GradeSet;
-}
-
-impl Graded for f64 {
-    fn grade_set(&self) -> GradeSet {
-        GradeSet::g(0)
     }
 }
 
