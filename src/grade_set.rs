@@ -22,7 +22,7 @@ impl PartialEq for GradeSet {
 impl GradeSet {
     /// The grade of zero. (In GA, zero is polymorphic: it's a scalar, a vector,
     /// a bivector etc. at the same time)
-    pub fn g_any() -> Self {
+    pub fn g_none() -> Self {
         GradeSet(BitVec::new())
         // A empty bitvec is just treated as a bitvec full of zeroes
     }
@@ -96,6 +96,12 @@ impl GradeSet {
         );
         other_grade
     }
+
+    /// Restricts `a` and `b` to the grades that will, when multiplied, affect
+    /// those of `self`
+    pub fn grades_affecting_geom_prod(&self, a: Self, b: Self) -> (Self, Self) {
+        (a, b)
+    }
 }
 
 fn sort_by_len<T>(v1: T, v2: T) -> (T, T)
@@ -145,7 +151,7 @@ impl std::ops::Mul for GradeSet {
 mod tests {
     use super::*;
     const G: fn(usize) -> GradeSet = GradeSet::g;
-    const G_ANY: fn() -> GradeSet = GradeSet::g_any;
+    const G_NONE: fn() -> GradeSet = GradeSet::g_none;
 
     macro_rules! test_eqs {
         ($($test_name:ident : $a:expr => $b:expr),*) => {
@@ -165,8 +171,8 @@ mod tests {
 
     test_eqs!(
         add_self_id: G(3) + G(3) => G(3),
-        add_g_any_id: G(3) + G_ANY() => G(3),
-        mul_g_any_absorb: G(3) * G_ANY() => G_ANY(),
+        add_g_any_id: G(3) + G_NONE() => G(3),
+        mul_g_any_absorb: G(3) * G_NONE() => G_NONE(),
         mul_vecs: G(1) * G(1) => G(0) + G(2),
         mul_scal_id: G(40) * G(0) => G(40),
         mul_bivec_quadvec: G(2) * G(4) => G(2) + G(4) + G(6),
@@ -177,7 +183,7 @@ mod tests {
         project: GradeSet::range(0,10).prj(GradeSet::range(4,6)) => GradeSet::range(4,6),
         single_graded: (G(1) + G(1)).is_single_graded() => true,
         not_single_graded: (G(1) + G(2)).is_single_graded() => false,
-        g_any_not_single_graded: G_ANY().is_single_graded() => false,
+        g_any_not_single_graded: G_NONE().is_single_graded() => false,
         iter_grades: (G(1) + G(22) + G(10)).iter_grades().collect::<Vec<_>>() => vec![1,10,22]
     );
 }

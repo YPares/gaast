@@ -47,7 +47,7 @@ impl DynSizedMV {
         Self {
             grade_set: m
                 .keys()
-                .fold(GradeSet::g_any(), |acc, &k| acc + GradeSet::g(k)),
+                .fold(GradeSet::g_none(), |acc, &k| acc + GradeSet::g(k)),
             contents: m,
         }
     }

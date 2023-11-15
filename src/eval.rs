@@ -49,24 +49,6 @@ impl<const D: usize> MetricGA for [f64; D] {
     }
 }
 
-// impl<T> Ast<T> {
-//     pub fn propagate_grades(&mut self, wanted: GradeSet) {
-//         match self {
-//             Ast::Val(_) => (),
-//             Ast::Add(e1, e2) => {
-//                 e1.grade_set.borrow_mut()
-//             },
-//             Ast::Mul(_, _) => todo!(),
-//             Ast::Neg(_) => todo!(),
-//             Ast::Exp(_) => todo!(),
-//             Ast::Log(_) => todo!(),
-//             Ast::Rev(_) => todo!(),
-//             Ast::GInvol(_) => todo!(),
-//             Ast::ScalarInv(_) => todo!(),
-//         }
-//     }
-// }
-
 // impl<T: Graded> GAExpr<T> {
 //     /// Evaluates a [`GAExpr`]
 //     pub fn eval(&self, m: impl MetricGA) -> DynSizedMV {
