@@ -54,6 +54,10 @@ impl GradeSet {
         self.0.iter_ones()
     }
 
+    pub fn is_none(&self) -> bool {
+        self.0.not_any()
+    }
+
     /// Whether the GradeSet contains exactly one grade
     pub fn is_single_graded(&self) -> bool {
         let mut iter = self.0.iter_ones();
@@ -99,8 +103,20 @@ impl GradeSet {
 
     /// Restricts `a` and `b` to the grades that will, when multiplied, affect
     /// those of `self`
-    pub fn grades_affecting_geom_prod(&self, a: Self, b: Self) -> (Self, Self) {
-        (a, b)
+    pub fn grades_affecting_mul(&self, a: &Self, b: &Self) -> (Self, Self) {
+        let mut ra = GradeSet::g_none();
+        let mut rb = GradeSet::g_none();
+        for ka in a.iter_grades() {
+            for kb in b.iter_grades() {
+                if self.clone().prj(GradeSet::g(ka) * GradeSet::g(kb)).0.any() {
+                    // The product of ka and kb yields at least one grade that
+                    // is in self
+                    ra = ra + GradeSet::g(ka);
+                    rb = rb + GradeSet::g(kb);
+                }
+            }
+        }
+        (ra, rb)
     }
 }
 
@@ -184,6 +200,9 @@ mod tests {
         single_graded: (G(1) + G(1)).is_single_graded() => true,
         not_single_graded: (G(1) + G(2)).is_single_graded() => false,
         g_any_not_single_graded: G_NONE().is_single_graded() => false,
-        iter_grades: (G(1) + G(22) + G(10)).iter_grades().collect::<Vec<_>>() => vec![1,10,22]
+        iter_grades: (G(1) + G(22) + G(10)).iter_grades().collect::<Vec<_>>() => vec![1,10,22],
+        grades_affecting_mul:
+          G(0).grades_affecting_mul(&(G(1) + G(0) + G(2) + G(10)), &(G(0) + G(2) + G(6)))
+          => (G(0) + G(2), G(0) + G(2))
     );
 }

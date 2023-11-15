@@ -125,12 +125,11 @@ impl<T> GAExpr<T> {
     /// Recursively propagate wanted grades downwards so as to evaluate for each
     /// sub-expression only the grades that are necessary to compute the whole
     /// [`GAExpr`]
-    pub(crate) fn resolve_minimum_grades(self) -> Self {
-        let gs = self.0.grade_set();
+    pub fn resolve_minimum_grades(self) -> Self {
         // The process is split in two because sub-expressions may be used at
         // several places in the AST. First we collect all the requirements for
         // expressions throughout the whole tree, as hints to be applied later:
-        self.propagate_grade_hints(gs);
+        self.propagate_grade_hints(self.0.grade_set());
         // Then for each node we apply the hints collected previously:
         self.apply_grade_hints();
         self
@@ -152,7 +151,7 @@ impl<T> GAExpr<T> {
                 // Find in e1 and e2 which grades, once multiplied, will affect
                 // the grades in `wanted`
                 let (e1_wanted, e2_wanted) =
-                    wanted.grades_affecting_geom_prod(e1.0.grade_set(), e2.0.grade_set());
+                    wanted.grades_affecting_mul(&e1.0.grade_set(), &e2.0.grade_set());
                 e1.propagate_grade_hints(e1_wanted);
                 e2.propagate_grade_hints(e2_wanted);
             }
