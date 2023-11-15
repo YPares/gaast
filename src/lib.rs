@@ -2,7 +2,7 @@
 pub mod ast;
 pub mod eval;
 pub mod grade_set;
-pub mod raw;
+pub mod graded;
 
 macro_rules! pub_all {
     (

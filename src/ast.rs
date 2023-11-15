@@ -1,63 +1,37 @@
 //! Represent a GA expression using an abstract syntax tree
 
 use super::grade_set::*;
+use super::graded::Graded;
 use std::rc::Rc;
 use Ast::*;
 
-/// The trait for all objects that are graded
-pub trait Graded {
-    /// Get the GradeSet of the object
-    fn grade_set(&self) -> GradeSet;
-    /// Create an instance of the graded object with just a grade 0 part
-    fn from_scalar(x: f64) -> Self;
-}
-
-macro_rules! Graded_blanket_impls {
-    ($($ref:tt),*) => {
-        $(impl<T: Graded> Graded for $ref<T> {
-            fn grade_set(&self) -> GradeSet {
-                (**self).grade_set()
-            }
-            fn from_scalar(x: f64) -> Self {
-                $ref::new(T::from_scalar(x))
-            }
-        })*
-    };
-}
-Graded_blanket_impls!(Rc, Box);
-
-impl Graded for f64 {
-    fn grade_set(&self) -> GradeSet {
-        GradeSet::g(0)
-    }
-    fn from_scalar(x: f64) -> Self {
-        x
-    }
-}
-
-pub(crate) enum Ast<T> {
+#[derive(Hash)]
+pub(crate) enum Ast<E, T> {
     Val(T),
-    Add(GAExpr<T>, GAExpr<T>),
+    Add(E, E),
     /// The geometric product
-    Mul(GAExpr<T>, GAExpr<T>),
-    Exp(GAExpr<T>),
-    Log(GAExpr<T>),
+    Mul(E, E),
+    /// Negate
+    Neg(E),
+    Exp(E),
+    Log(E),
     /// The reverse (or "dagger")
-    Rev(GAExpr<T>),
+    Rev(E),
     /// The grade involution (or main involution)
-    GInvol(GAExpr<T>),
+    GInvol(E),
     /// Regular scalar inversion _on a expression that evaluates to a scalar_
-    ScalarInv(GAExpr<T>),
+    ScalarInv(E),
 }
 
 /// An AST representing primitive GA operations, which allows to infer the
 /// grades contained in the multivector returned by the expression without
 /// having to evaluate it. This is represented by a [GradeSet] which can then be
-/// used to optimize allocations while evaluating the expression
+/// further restrained depending on the use sites of this GAExpr, and then used
+/// to optimize allocations while evaluating the expression
 #[derive(Clone)]
 pub struct GAExpr<T> {
     pub(crate) grade_set: GradeSet,
-    pub(crate) ast: Rc<Ast<T>>,
+    pub(crate) ast: Rc<Ast<GAExpr<T>, T>>,
 }
 
 impl<T> std::ops::Add for GAExpr<T> {
@@ -123,14 +97,11 @@ impl<T: Graded> GAExpr<T> {
         }
     }
 
-    /// To some floating-point power. Refer to [`Self::log`] for limitations
-    pub fn powf(self, p: f64) -> Self {
-        GAExpr::exp(GAExpr::log(self) * GAExpr::val(T::from_scalar(p)))
-    }
-
-    /// Square root. Refer to [`Self::log`] for limitations
-    pub fn sqrt(self) -> Self {
-        self.powf(0.5)
+    /// To some floating-point power. `p` must therefore evaluate to a scalar.
+    /// Refer to [`Self::log`] for limitations
+    pub fn pow(self, p: GAExpr<T>) -> Self {
+        assert!(p.grade_set == GradeSet::g(0));
+        GAExpr::exp(GAExpr::log(self) * p)
     }
 }
 
@@ -156,8 +127,11 @@ impl<T: Clone> GAExpr<T> {
 
 impl<T: Graded + Clone> std::ops::Neg for GAExpr<T> {
     type Output = Self;
-    fn neg(self) -> Self::Output {
-        self * GAExpr::val(T::from_scalar(-1.0))
+    fn neg(self) -> Self {
+        Self {
+            grade_set: self.grade_set.clone(),
+            ast: Rc::new(Neg(self)),
+        }
     }
 }
 

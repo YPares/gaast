@@ -53,7 +53,7 @@ impl GradeSet {
     pub fn iter_grades(&self) -> impl Iterator<Item = usize> + '_ {
         self.0.iter_ones()
     }
-    
+
     /// Whether the GradeSet contains exactly one grade
     pub fn is_single_graded(&self) -> bool {
         let mut iter = self.0.iter_ones();
