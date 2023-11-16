@@ -4,39 +4,54 @@ use super::grade_set::*;
 use super::graded::Graded;
 use std::cell::RefCell;
 use std::rc::Rc;
-use Ast::*;
+use AstNode::*;
 
-#[derive(Hash, Clone)]
-pub(crate) enum Ast<E, T> {
+/// The abstract syntax tree nodes representing geometric algebra primitive
+/// operations. `T` is some raw multivector type, and `E` is a boxed type itself
+/// containing an `AstNode`.
+#[derive(Hash, Clone, Debug)]
+pub enum AstNode<E, T> {
+    /// Use of a raw multivector which exposes which grades it contains. To do
+    /// so, most operations on `Ast` require `T: [Graded]`
     Val(T),
+    /// Multivector addition
     Add(E, E),
-    /// The geometric product
+    /// Geometric product
     Mul(E, E),
-    /// Negate
+    /// Multivector negation
     Neg(E),
+    /// Multivector exponentiation. See [`GAExpr::exp`] for limitations
     Exp(E),
+    /// Multivector natural logarithm. See [`GAExpr::log`] for limitations
     Log(E),
+    /// Grade projection (or "grade extraction"). The grade to extract is stored
+    /// here only for error-reporting reasons
     Prj(E, usize),
-    /// The reverse (or "dagger")
+    /// Reverse (or "dagger")
     Rev(E),
-    /// The grade involution (or main involution)
+    /// Grade involution (or main involution)
     GInvol(E),
-    /// Regular scalar inversion _on a expression that evaluates to a scalar_
+    /// Regular scalar inversion _on an expression that evaluates to a scalar_
     ScalarInv(E),
 }
 
-/// Assign a [`GradeSet`] to some [`Ast`]
-pub(crate) struct GradedAst<E, T> {
+/// Assign a [`GradeSet`] to some [`AstNode`]. This [`GradeSet`] can be modified
+/// to be restricted further depending on where this [`AstNode`] is being used,
+/// ie. which grades its use sites actually need
+#[derive(Debug)]
+pub struct GradedNode<E, T> {
     grade_set_cell: RefCell<GradeSet>,
     grade_set_hints: RefCell<Option<GradeSet>>,
-    ast: Ast<E, T>,
+    ast: AstNode<E, T>,
 }
 
-impl<E, T> GradedAst<E, T> {
-    pub(crate) fn grade_set(&self) -> GradeSet {
+impl<E, T> GradedNode<E, T> {
+    /// Get the grade associated to this node
+    pub fn grade_set(&self) -> GradeSet {
         self.grade_set_cell.borrow().clone()
     }
-    pub(crate) fn ast(&self) -> &Ast<E, T> {
+    /// Get the part of this AST contained under this node
+    pub fn ast(&self) -> &AstNode<E, T> {
         &self.ast
     }
     fn add_hint(&self, new: GradeSet) {
@@ -64,21 +79,31 @@ impl<E, T> GradedAst<E, T> {
 /// having to evaluate it. This is represented by a [`GradeSet`] which can then
 /// be further restrained depending on the use sites of this GAExpr, and then
 /// used to optimize allocations while evaluating the expression
-#[derive(Clone)]
-pub struct GAExpr<T>(pub(crate) Rc<GradedAst<Self, T>>);
+/// 
+/// `GAExpr` dereferences to a [`GradedNode`], so you can call [`GradedNode`]
+/// methods on a `GAExpr`
+#[derive(Clone, Debug)]
+pub struct GAExpr<T>(Rc<GradedNode<Self, T>>);
+
+impl<T> std::ops::Deref for GAExpr<T> {
+    type Target = GradedNode<Self, T>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 impl<T> std::ops::Add for GAExpr<T> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
-        Self::wrap(self.0.grade_set() + rhs.0.grade_set(), Add(self, rhs))
+        Self::wrap(self.grade_set() + rhs.grade_set(), Add(self, rhs))
     }
 }
 
 impl<T> std::ops::Mul for GAExpr<T> {
     type Output = Self;
     fn mul(self, rhs: Self) -> Self::Output {
-        Self::wrap(self.0.grade_set() * rhs.0.grade_set(), Mul(self, rhs))
+        Self::wrap(self.grade_set() * rhs.grade_set(), Mul(self, rhs))
     }
 }
 
@@ -88,7 +113,7 @@ macro_rules! unary_ops {
             #[doc=$doc]
             pub fn $fn_name(self) -> Self {
                 Self::wrap(
-                    self.0.grade_set().$grade_op(),
+                    self.grade_set().$grade_op(),
                     $ctor(self),
                 )
             }
@@ -97,8 +122,8 @@ macro_rules! unary_ops {
 }
 
 impl<T> GAExpr<T> {
-    fn wrap(gs: GradeSet, ast: Ast<Self, T>) -> Self {
-        Self(Rc::new(GradedAst {
+    fn wrap(gs: GradeSet, ast: AstNode<Self, T>) -> Self {
+        Self(Rc::new(GradedNode {
             grade_set_cell: RefCell::new(gs),
             grade_set_hints: RefCell::new(None),
             ast,
@@ -114,7 +139,7 @@ impl<T> GAExpr<T> {
 
     /// Grade projection: a.prj(k) = \<a\>_k
     pub fn prj(self, k: usize) -> Self {
-        Self::wrap(self.0.grade_set().prj(GradeSet::g(k)), Prj(self, k))
+        Self::wrap(self.grade_set().prj(GradeSet::g(k)), Prj(self, k))
     }
 
     /// Scalar product
@@ -129,17 +154,20 @@ impl<T> GAExpr<T> {
         // The process is split in two because sub-expressions may be used at
         // several places in the AST. First we collect all the requirements for
         // expressions throughout the whole tree, as hints to be applied later:
-        self.propagate_grade_hints(self.0.grade_set());
+        self.propagate_grade_hints(self.grade_set());
         // Then for each node we apply the hints collected previously:
         self.apply_grade_hints();
         self
     }
 
     fn propagate_grade_hints(&self, wanted: GradeSet) {
-        self.0.add_hint(wanted.clone());
-        match self.0.ast() {
+        // Here, we know the resulting grade of the operation represented by the
+        // top node of the AST, and we "undo" it to find the grades wanted in
+        // its operands
+        self.add_hint(wanted.clone());
+        match self.ast() {
             Val(_) => {}
-            Neg(e) | Prj(e, _) | Rev(e) | GInvol(e) | ScalarInv(e) => {
+            Prj(e, _) | Neg(e) | Rev(e) | GInvol(e) | ScalarInv(e) => {
                 e.propagate_grade_hints(wanted);
             }
             Add(e1, e2) => {
@@ -151,18 +179,18 @@ impl<T> GAExpr<T> {
                 // Find in e1 and e2 which grades, once multiplied, will affect
                 // the grades in `wanted`
                 let (e1_wanted, e2_wanted) =
-                    wanted.grades_affecting_mul(&e1.0.grade_set(), &e2.0.grade_set());
+                    wanted.grades_affecting_mul(&e1.grade_set(), &e2.grade_set());
                 e1.propagate_grade_hints(e1_wanted);
                 e2.propagate_grade_hints(e2_wanted);
             }
-            Exp(_) => todo!(),
-            Log(_) => todo!(),
+            Exp(e) => e.propagate_grade_hints(wanted.log()),
+            Log(e) => e.propagate_grade_hints(wanted.exp()),
         }
     }
 
     fn apply_grade_hints(&self) {
-        self.0.apply_hints();
-        match self.0.ast() {
+        self.apply_hints();
+        match self.ast() {
             Val(_) => {}
             Neg(e) | Prj(e, _) | Rev(e) | GInvol(e) | ScalarInv(e) | Exp(e) | Log(e) => {
                 e.apply_grade_hints();
@@ -178,13 +206,13 @@ impl<T> GAExpr<T> {
 impl<T: Graded> GAExpr<T> {
     /// Create a GA expression from a raw value
     pub fn val(x: T) -> Self {
-        Self::wrap(x.grade_set(), Ast::Val(x))
+        Self::wrap(x.grade_set(), AstNode::Val(x))
     }
 
     /// To some floating-point power. `p` must therefore evaluate to a scalar.
     /// Refer to [`Self::log`] for limitations
     pub fn pow(self, p: GAExpr<T>) -> Self {
-        assert!(p.0.grade_set() == GradeSet::g(0));
+        assert!(p.grade_set() == GradeSet::g(0));
         GAExpr::exp(GAExpr::log(self) * p)
     }
 }
@@ -192,9 +220,9 @@ impl<T: Graded> GAExpr<T> {
 impl<T: Clone> GAExpr<T> {
     /// Inverse
     pub fn inv(self) -> Self {
-        if self.0.grade_set() == GradeSet::g(0) {
+        if self.grade_set() == GradeSet::g(0) {
             // Regular scalar inversion
-            Self::wrap(self.0.grade_set(), ScalarInv(self))
+            Self::wrap(self.grade_set(), ScalarInv(self))
         } else {
             self.clone().rev() * self.norm_sq().inv()
         }
@@ -209,7 +237,7 @@ impl<T: Clone> GAExpr<T> {
 impl<T: Graded + Clone> std::ops::Neg for GAExpr<T> {
     type Output = Self;
     fn neg(self) -> Self {
-        Self::wrap(self.0.grade_set(), Neg(self))
+        Self::wrap(self.grade_set(), Neg(self))
     }
 }
 

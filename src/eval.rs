@@ -1,3 +1,5 @@
+//! How to evaluate a GA expression into an actual multivector
+
 use crate::grade_set::GradeSet;
 
 use super::ast::*;
@@ -49,19 +51,20 @@ impl<const D: usize> MetricGA for [f64; D] {
     }
 }
 
-// impl<T: Graded> GAExpr<T> {
-//     /// Evaluates a [`GAExpr`]
-//     pub fn eval(&self, m: impl MetricGA) -> DynSizedMV {
-//         match self.ast.as_ref() {
-//             Ast::Val(x) => todo!(),
-//             Ast::Add(_, _) => todo!(),
-//             Ast::Mul(_, _) => todo!(),
-//             Ast::Neg(_) => todo!(),
-//             Ast::Exp(_) => todo!(),
-//             Ast::Log(_) => todo!(),
-//             Ast::Rev(_) => todo!(),
-//             Ast::GInvol(_) => todo!(),
-//             Ast::ScalarInv(_) => todo!(),
-//         }
-//     }
-// }
+impl<T: Graded> GAExpr<T> {
+    /// Evaluates a [`GAExpr`]
+    pub fn eval(&self, m: impl MetricGA) -> DynSizedMV {
+        match self.ast() {
+            AstNode::Val(x) => todo!(),
+            AstNode::Add(_, _) => todo!(),
+            AstNode::Mul(_, _) => todo!(),
+            AstNode::Neg(_) => todo!(),
+            AstNode::Exp(_) => todo!(),
+            AstNode::Log(_) => todo!(),
+            AstNode::Rev(_) => todo!(),
+            AstNode::GInvol(_) => todo!(),
+            AstNode::ScalarInv(_) => todo!(),
+            AstNode::Prj(_, _) => todo!(),
+        }
+    }
+}

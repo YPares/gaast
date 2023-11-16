@@ -1,7 +1,11 @@
+//! The [`Graded`] trait, for types that contain or allow to read graded data
+//! (raw multivectors)
+
 use super::grade_set::GradeSet;
 use std::{collections::HashMap, rc::Rc};
 
-/// The trait for all objects that are graded
+/// The trait for all objects that are graded, ie. from which we can extract an
+/// array of components corresponding to some grade
 pub trait Graded {
     /// Get the GradeSet of the object
     fn grade_set(&self) -> GradeSet;

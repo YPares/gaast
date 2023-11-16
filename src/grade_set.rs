@@ -3,10 +3,15 @@
 
 use bitvec::prelude::*;
 
-/// Represents the set of grades that can be contained in some multivector. Can
-/// be added or multiplied together, and will yield the grades of the
-/// multivector obtained by addition/geometric multiplication of two
-/// multivectors.
+/// Represents the set of grades that can be contained in some multivector. You
+/// can think of it as the "type" of a multivector, which supports the same
+/// operation actual multivectors do, by mirroring the effects those operations
+/// have on multivectors grades. Therefore, GradeSets can be added or multiplied
+/// together, and this will yield the GradeSet of the multivector obtained by
+/// addition/geometric multiplication of two multivectors. Other GA primitives
+/// are provided (like exp & log), with some limitations indicated in the
+/// methods' documentation. This allows to perform _grade inference_ on
+/// multivector expressions _without_ having to actually compute them.
 #[derive(Debug, Eq, Clone)]
 pub struct GradeSet(BitVec);
 
@@ -20,8 +25,10 @@ impl PartialEq for GradeSet {
 }
 
 impl GradeSet {
-    /// The grade of zero. (In GA, zero is polymorphic: it's a scalar, a vector,
-    /// a bivector etc. at the same time)
+    /// The `GradeSet` of _zero_. In GA, `0` is _polymorphic_: it's a scalar or
+    /// any k-vector or linear combination of those at the same time. Whatever
+    /// the grades contained in a multivector, it can _always_ be zero. And when
+    /// a multivector has _no_ grades, then it can _only_ be zero.
     pub fn g_none() -> Self {
         GradeSet(BitVec::new())
         // A empty bitvec is just treated as a bitvec full of zeroes
@@ -54,6 +61,8 @@ impl GradeSet {
         self.0.iter_ones()
     }
 
+    /// Whether the GradeSet contains no grades. If so, the expression it is
+    /// attached to can only be equal to zero
     pub fn is_none(&self) -> bool {
         self.0.not_any()
     }
@@ -101,8 +110,8 @@ impl GradeSet {
         other_grade
     }
 
-    /// Restricts `a` and `b` to the grades that will, when multiplied, affect
-    /// those of `self`
+    /// Returns `a` and `b` restricted to their grades that will, when
+    /// multiplied, affect those of `self`
     pub fn grades_affecting_mul(&self, a: &Self, b: &Self) -> (Self, Self) {
         let mut ra = GradeSet::g_none();
         let mut rb = GradeSet::g_none();
