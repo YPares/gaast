@@ -63,7 +63,7 @@ impl GradeSet {
 
     /// Whether the GradeSet contains no grades. If so, the expression it is
     /// attached to can only be equal to zero
-    pub fn is_none(&self) -> bool {
+    pub fn has_no_grade(&self) -> bool {
         self.0.not_any()
     }
 
@@ -77,6 +77,19 @@ impl GradeSet {
             return false;
         }
         true
+    }
+
+    /// Whether the GradeSet contains the grade k
+    pub fn contains(&self, k: usize) -> bool {
+        match self.0.get(k) {
+            None => false,
+            Some(x) => *x,
+        }
+    }
+
+    /// Whether the GradeSet contains only the grade k
+    pub fn is_just(&self, k: usize) -> bool {
+        self.contains(k) && self.is_single_graded()
     }
 
     /// Remove a grade from the set
@@ -95,7 +108,7 @@ impl GradeSet {
     pub fn exp(self) -> Self {
         assert!(
             self.is_single_graded(),
-            "exp cannot be used on a multivector, only k-vector"
+            "exp cannot be used on a multivector, only a k-vector"
         );
         GradeSet::g(0) + self
     }
