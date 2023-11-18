@@ -1,9 +1,8 @@
 //! Represent a GA expression using an abstract syntax tree
 
 use super::{grade_set::*, graded::Graded};
-use std::cell::RefCell;
-use std::rc::Rc;
-use AstNode::*;
+use std::{borrow::Borrow as _, cell::RefCell, rc::Rc};
+use AstNode as N;
 
 /// The abstract syntax tree nodes representing geometric algebra primitive
 /// operations. `T` is some raw multivector type, and `E` is a boxed type itself
@@ -65,7 +64,7 @@ impl<E, T> GradedNode<E, T> {
         match self.grade_set_hints.borrow().as_ref() {
             Some(hints) => {
                 self.grade_set_cell
-                    .replace_with(|g| g.clone().prj(hints.clone()));
+                    .replace_with(|g| g.clone().and(hints.clone()));
             }
             None => {}
         };
@@ -79,8 +78,7 @@ impl<E, T> GradedNode<E, T> {
 /// be further restrained depending on the use sites of this GAExpr, and then
 /// used to optimize allocations while evaluating the expression
 ///
-/// `GAExpr` dereferences to a [`GradedNode`], so you can call [`GradedNode`]
-/// methods on a `GAExpr`
+/// Uses [`Rc`] internally, so you can safely clone it extensively.
 #[derive(Clone, Debug)]
 pub struct GAExpr<T>(Rc<GradedNode<Self, T>>);
 
@@ -96,7 +94,7 @@ impl<T> std::ops::Add for GAExpr<T> {
 
     fn add(self, rhs: Self) -> Self::Output {
         let gs = self.grade_set().clone() + rhs.grade_set().clone();
-        Self::wrap(gs, Add(self, rhs))
+        Self::wrap(gs, N::Add(self, rhs))
     }
 }
 
@@ -104,7 +102,21 @@ impl<T> std::ops::Mul for GAExpr<T> {
     type Output = Self;
     fn mul(self, rhs: Self) -> Self::Output {
         let gs = self.grade_set().clone() * rhs.grade_set().clone();
-        Self::wrap(gs, Mul(self, rhs))
+        Self::wrap(gs, N::Mul(self, rhs))
+    }
+}
+
+impl<T: Graded> GAExpr<T> {
+    /// Create a GA expression from a raw input multivector value
+    pub fn val(x: T) -> Self {
+        Self::wrap(x.grade_set().borrow().clone(), AstNode::Val(x))
+    }
+
+    /// Raise to some power. Shortcut for `exp(log(self) * p)`, usually with `p`
+    /// evaluating to a scalar. Therefore, please refer to [`Self::log`] and
+    /// [`Self::exp`] for limitations
+    pub fn pow(self, p: GAExpr<T>) -> Self {
+        GAExpr::exp(GAExpr::log(self) * p)
     }
 }
 
@@ -116,27 +128,10 @@ macro_rules! unary_ops {
                 let gs = self.grade_set().clone().$grade_op();
                 Self::wrap(
                     gs,
-                    $ctor(self),
+                    N::$ctor(self),
                 )
             }
         )*
-    }
-}
-
-impl<T: Graded> GAExpr<T> {
-    /// Create a GA expression from a raw input multivector value
-    pub fn val(x: T) -> Self {
-        Self::wrap(x.grade_set(), AstNode::Val(x))
-    }
-
-    /// To some floating-point power. `p` must therefore evaluate to a scalar.
-    /// Refer to [`Self::log`] for limitations
-    pub fn pow(self, p: GAExpr<T>) -> Self {
-        assert!(
-            p.grade_set().is_just(0),
-            "Pow can only be applied if the expression in exponent evaluates to a scalar"
-        );
-        GAExpr::exp(GAExpr::log(self) * p)
     }
 }
 
@@ -158,16 +153,16 @@ impl<T> GAExpr<T> {
 
     /// Grade projection: a.prj(k) = \<a\>_k
     pub fn prj(self, k: Grade) -> Self {
-        let gs = self.grade_set().clone().prj(GradeSet::single(k));
-        Self::wrap(gs, Prj(self, k))
+        let gs = self.grade_set().clone().and(GradeSet::single(k));
+        Self::wrap(gs, N::Prj(self, k))
     }
 
-    /// Scalar product
+    /// Scalar product. Just a shortcut for `(self.rev() * rhs).prj(0)`
     pub fn scal(self, rhs: Self) -> Self {
         (self.rev() * rhs).prj(0)
     }
 
-    /// Clifford conjugate (combination of reverse & grade involution)
+    /// Clifford conjugate. Just a shortcut for `self.rev().ginvol()`
     pub fn conj(self) -> Self {
         self.rev().ginvol()
     }
@@ -191,16 +186,16 @@ impl<T> GAExpr<T> {
         // its operands
         self.add_hint(wanted.clone());
         match self.ast_node() {
-            Val(_) => {}
-            Prj(e, _) | Neg(e) | Rev(e) | GInvol(e) | ScalarInv(e) => {
+            N::Val(_) => {}
+            N::Prj(e, _) | N::Neg(e) | N::Rev(e) | N::GInvol(e) | N::ScalarInv(e) => {
                 e.propagate_grade_hints(wanted);
             }
-            Add(e1, e2) => {
+            N::Add(e1, e2) => {
                 // <A + B>_k = <A>_k + <B>_k
                 e1.propagate_grade_hints(wanted);
                 e2.propagate_grade_hints(wanted);
             }
-            Mul(e1, e2) => {
+            N::Mul(e1, e2) => {
                 // Find in e1 and e2 which grades, once multiplied, will affect
                 // the grades in `wanted`
                 let (e1_wanted, e2_wanted) =
@@ -208,19 +203,25 @@ impl<T> GAExpr<T> {
                 e1.propagate_grade_hints(&e1_wanted);
                 e2.propagate_grade_hints(&e2_wanted);
             }
-            Exp(e) => e.propagate_grade_hints(&wanted.clone().log()),
-            Log(e) => e.propagate_grade_hints(&wanted.clone().exp()),
+            N::Exp(e) => e.propagate_grade_hints(&wanted.clone().log()),
+            N::Log(e) => e.propagate_grade_hints(&wanted.clone().exp()),
         }
     }
 
     fn apply_grade_hints(&self) {
         self.apply_hints();
         match self.ast_node() {
-            Val(_) => {}
-            Neg(e) | Prj(e, _) | Rev(e) | GInvol(e) | ScalarInv(e) | Exp(e) | Log(e) => {
+            N::Val(_) => {}
+            N::Neg(e)
+            | N::Prj(e, _)
+            | N::Rev(e)
+            | N::GInvol(e)
+            | N::ScalarInv(e)
+            | N::Exp(e)
+            | N::Log(e) => {
                 e.apply_grade_hints();
             }
-            Add(e1, e2) | Mul(e1, e2) => {
+            N::Add(e1, e2) | N::Mul(e1, e2) => {
                 e1.apply_grade_hints();
                 e2.apply_grade_hints();
             }
@@ -229,18 +230,18 @@ impl<T> GAExpr<T> {
 }
 
 impl<T: Clone> GAExpr<T> {
-    /// Inverse
+    /// Inverse. Just a shortcut for `self.clone().rev() * self.norm_sq().inv()`
     pub fn inv(self) -> Self {
         if self.grade_set().is_just(0) {
             // Regular scalar inversion
             let gs = self.grade_set().clone();
-            Self::wrap(gs, ScalarInv(self))
+            Self::wrap(gs, N::ScalarInv(self))
         } else {
             self.clone().rev() * self.norm_sq().inv()
         }
     }
 
-    /// Norm squared
+    /// Norm squared. Just a shortcut for `(self.clone().rev() * self).prj(0)`
     pub fn norm_sq(self) -> Self {
         self.clone().scal(self)
     }
@@ -250,7 +251,7 @@ impl<T: Graded + Clone> std::ops::Neg for GAExpr<T> {
     type Output = Self;
     fn neg(self) -> Self {
         let gs = self.grade_set().clone();
-        Self::wrap(gs, Neg(self))
+        Self::wrap(gs, N::Neg(self))
     }
 }
 

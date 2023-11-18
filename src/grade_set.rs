@@ -12,6 +12,13 @@ use bitvec::prelude::*;
 /// are provided (like exp & log), with some limitations indicated in the
 /// methods' documentation. This allows to perform _grade inference_ on
 /// multivector expressions _without_ having to actually compute them.
+/// 
+/// Implementation notes: This is implemented using a heap-allocated BitVec (not
+/// a "big enough" statically-sized type like u64) in order to be truly agnostic
+/// of the underlying vec space dimensionality N, and therefore of the final
+/// number of different grades (N+1) of the GA it creates. The penalty it incurs
+/// for vector spaces of lower dimensions (which will generate a GA with fewer than 64 grades)
+/// is not evaluated yet
 #[derive(Debug, Eq, Clone)]
 pub struct GradeSet(BitVec);
 
@@ -53,10 +60,13 @@ impl GradeSet {
         GradeSet(v)
     }
 
-    /// Grade projection: select part of the grades contained in self, using
-    /// another GradeSet as a selector
-    pub fn prj(self, other: Self) -> Self {
+    /// GradeSet intersection: select the grades contained in both `self` and
+    /// `other`. You can think of it as grade projection (extraction) performed
+    /// on `self`, using `other` as the set of grades to keep
+    pub fn and(self, other: Self) -> Self {
         GradeSet(self.0 & other.0)
+        // Note: the resulting bitvec will always have the same length as
+        // `self.0`
     }
 
     /// Iterate over each grade present in the GradeSet
@@ -137,12 +147,16 @@ impl GradeSet {
 
     /// Returns `a` and `b` restricted to their grades that will, when
     /// multiplied, affect those of `self`
+    /// 
+    /// NAIVE GREEDY IMPLEMENTATION FOR NOW. Though its usage is limited to the
+    /// AST grade minimisation phase (downwards grade inference), therefore this
+    /// method is not used when actually evaluating a GA expression
     pub fn grades_affecting_mul(&self, a: &Self, b: &Self) -> (Self, Self) {
         let mut ra = Self::empty();
         let mut rb = Self::empty();
         for ka in a.iter() {
             for kb in b.iter() {
-                if self.clone().prj(Self::single(ka) * Self::single(kb)).0.any() {
+                if self.clone().and(Self::single(ka) * Self::single(kb)).0.any() {
                     // The product of ka and kb yields at least one grade that
                     // is in self
                     ra = ra + Self::single(ka);
@@ -173,6 +187,9 @@ impl std::ops::Add for GradeSet {
     }
 }
 
+/// O(N^3) IMPLEMENTATION FOR NOW. Though its usage is limited to AST
+/// construction (upwards grade inference), therefore this method is not used
+/// when actually evaluating a GA expression
 impl std::ops::Mul for GradeSet {
     type Output = Self;
     fn mul(self, rhs: Self) -> Self::Output {
@@ -230,7 +247,7 @@ mod tests {
         mul_trivec_pentavec: S(3) * S(5) => S(2) + S(4) + S(6) + S(8),
         mul_vec_rotor: S(1) * (S(0) + S(2)) => S(1) + S(3),
         range: GradeSet::range(4,6) => S(4) + S(5) + S(6),
-        project: GradeSet::range(0,10).prj(GradeSet::range(4,6)) => GradeSet::range(4,6),
+        project: GradeSet::range(0,10).and(GradeSet::range(4,6)) => GradeSet::range(4,6),
         single_graded: (S(1) + S(1)).is_single() => true,
         not_single_graded: (S(1) + S(2)).is_single() => false,
         empty_not_single_graded: E().is_single() => false,

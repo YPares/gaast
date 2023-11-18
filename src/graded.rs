@@ -4,11 +4,16 @@
 use super::{algebra::n_choose_k, grade_set::*};
 use std::{collections::HashMap, rc::Rc};
 
-/// The trait for all objects that are graded, ie. from which we can extract an
-/// array of components corresponding to some grade
+/// The trait for all objects that are graded, ie. from which we can query
+/// grades and obtain an array of components corresponding to some grade
 pub trait Graded {
+    /// Either directly an owned GradeSet (for Graded objects which do not
+    /// directly hold on to a GradeSet and must reconstruct it on the fly) or a
+    /// ref to a GradeSet (for Graded objects which do internally already have
+    /// some GradeSet which can be reused read-only)
+    type GradeSetOrRef: std::borrow::Borrow<GradeSet>;
     /// Get the GradeSet of the object
-    fn grade_set(&self) -> GradeSet;
+    fn grade_set(&self) -> Self::GradeSetOrRef;
     /// Get a slice to the components of the k-vector part, given k. The length
     /// of the slice must exactly correspond to what is expected for that grade
     fn grade_slice(&self, k: Grade) -> &[f64];
@@ -35,7 +40,8 @@ pub trait GradedMut: Graded {
 macro_rules! Graded_blanket_impls {
     ($($ref:tt),*) => {
         $(impl<T: Graded> Graded for $ref<T> {
-            fn grade_set(&self) -> GradeSet {
+            type GradeSetOrRef = T::GradeSetOrRef;
+            fn grade_set(&self) -> Self::GradeSetOrRef {
                 (**self).grade_set()
             }
             fn grade_slice(&self, k: Grade) -> &[f64] {
@@ -56,7 +62,8 @@ impl<T: GradedMut> GradedMut for Box<T> {
 }
 
 impl Graded for f64 {
-    fn grade_set(&self) -> GradeSet {
+    type GradeSetOrRef = GradeSet;
+    fn grade_set(&self) -> Self::GradeSetOrRef {
         GradeSet::single(0)
     }
     fn grade_slice(&self, k: Grade) -> &[f64] {
@@ -84,13 +91,14 @@ impl GradedMut for f64 {
 pub struct HashMapMV(pub HashMap<Grade, Vec<f64>>);
 
 impl Graded for HashMapMV {
-    fn grade_set(&self) -> GradeSet {
+    type GradeSetOrRef = GradeSet;
+    fn grade_set(&self) -> Self::GradeSetOrRef {
         self.0
             .keys()
             .fold(GradeSet::empty(), |acc, &k| acc.add_grade(k))
     }
     fn grade_slice(&self, k: Grade) -> &[f64] {
-        self.0[&k].as_ref()
+        &self.0[&k]
     }
 }
 
