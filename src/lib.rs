@@ -17,4 +17,4 @@ pub mod graded;
 
 pub use ast::GAExpr;
 pub use grade_set::{Grade, GradeSet};
-pub use graded::{DynSizedMV, Graded};
+pub use graded::{HashMapMV, Graded};

@@ -32,13 +32,13 @@ impl GradeSet {
     /// any k-vector or linear combination of those at the same time. Whatever
     /// the grades contained in a multivector, it can _always_ be zero. And when
     /// a multivector has _no_ grades, then it can _only_ be zero.
-    pub fn g_none() -> Self {
+    pub fn empty() -> Self {
         GradeSet(BitVec::new())
-        // A empty bitvec is just treated as a bitvec full of zeroes
+        // An empty bitvec is just treated as a bitvec full of zeroes
     }
 
     /// The grade of a k-vector
-    pub fn g(k: Grade) -> Self {
+    pub fn single(k: Grade) -> Self {
         let mut v = bitvec![0; k + 1];
         v.set(k, true);
         GradeSet(v)
@@ -60,18 +60,18 @@ impl GradeSet {
     }
 
     /// Iterate over each grade present in the GradeSet
-    pub fn iter_grades(&self) -> impl Iterator<Item = Grade> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = Grade> + '_ {
         self.0.iter_ones()
     }
 
     /// Whether the GradeSet contains no grades. If so, the expression it is
     /// attached to can only be equal to zero
-    pub fn has_no_grade(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.0.not_any()
     }
 
     /// Whether the GradeSet contains exactly one grade
-    pub fn is_single_graded(&self) -> bool {
+    pub fn is_single(&self) -> bool {
         let mut iter = self.0.iter_ones();
         if let None = iter.next() {
             return false;
@@ -92,7 +92,16 @@ impl GradeSet {
 
     /// Whether the GradeSet contains only the grade k
     pub fn is_just(&self, k: Grade) -> bool {
-        self.contains(k) && self.is_single_graded()
+        self.contains(k) && self.is_single()
+    }
+
+    /// Add a grade to the set
+    pub fn add_grade(mut self, k: Grade) -> Self {
+        if k >= self.0.len() {
+            self.0.resize(k+1, false);
+        }
+        self.0.set(k, true);
+        self
     }
 
     /// Remove a grade from the set
@@ -110,17 +119,17 @@ impl GradeSet {
     /// Exponential. Is defined only for **single**-graded k-vectors
     pub fn exp(self) -> Self {
         assert!(
-            self.is_single_graded(),
+            self.is_single(),
             "exp cannot be used on a multivector, only a k-vector"
         );
-        GradeSet::g(0) + self
+        Self::single(0) + self
     }
 
     /// Logarithm. Is defined only for multivectors of the form \<A\>_0 + \<A\>_k
     pub fn log(self) -> Self {
         let other_grade = self.rm_grade(0);
         assert!(
-            other_grade.is_single_graded(),
+            other_grade.is_single(),
             "log can only be used on multivectors of the form <A>_0 + <A>_k"
         );
         other_grade
@@ -129,15 +138,15 @@ impl GradeSet {
     /// Returns `a` and `b` restricted to their grades that will, when
     /// multiplied, affect those of `self`
     pub fn grades_affecting_mul(&self, a: &Self, b: &Self) -> (Self, Self) {
-        let mut ra = GradeSet::g_none();
-        let mut rb = GradeSet::g_none();
-        for ka in a.iter_grades() {
-            for kb in b.iter_grades() {
-                if self.clone().prj(GradeSet::g(ka) * GradeSet::g(kb)).0.any() {
+        let mut ra = Self::empty();
+        let mut rb = Self::empty();
+        for ka in a.iter() {
+            for kb in b.iter() {
+                if self.clone().prj(Self::single(ka) * Self::single(kb)).0.any() {
                     // The product of ka and kb yields at least one grade that
                     // is in self
-                    ra = ra + GradeSet::g(ka);
-                    rb = rb + GradeSet::g(kb);
+                    ra = ra + Self::single(ka);
+                    rb = rb + Self::single(kb);
                 }
             }
         }
@@ -191,8 +200,8 @@ impl std::ops::Mul for GradeSet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    const G: fn(Grade) -> GradeSet = GradeSet::g;
-    const G_NONE: fn() -> GradeSet = GradeSet::g_none;
+    const S: fn(Grade) -> GradeSet = GradeSet::single;
+    const E: fn() -> GradeSet = GradeSet::empty;
 
     macro_rules! test_eqs {
         ($($test_name:ident : $a:expr => $b:expr),*) => {
@@ -207,27 +216,27 @@ mod tests {
 
     #[test]
     fn neq() {
-        assert_ne!(G(3), G(4))
+        assert_ne!(S(3), S(4))
     }
 
     test_eqs!(
-        add_self_id: G(3) + G(3) => G(3),
-        add_g_any_id: G(3) + G_NONE() => G(3),
-        mul_g_any_absorb: G(3) * G_NONE() => G_NONE(),
-        mul_vecs: G(1) * G(1) => G(0) + G(2),
-        mul_scal_id: G(40) * G(0) => G(40),
-        mul_bivec_quadvec: G(2) * G(4) => G(2) + G(4) + G(6),
-        mul_trivec_quadvec: G(3) * G(4) => G(1) + G(3) + G(5) + G(7),
-        mul_trivec_pentavec: G(3) * G(5) => G(2) + G(4) + G(6) + G(8),
-        mul_vec_rotor: G(1) * (G(0) + G(2)) => G(1) + G(3),
-        range: GradeSet::range(4,6) => G(4) + G(5) + G(6),
+        add_self_id: S(3) + S(3) => S(3),
+        add_empty_id: S(3) + E() => S(3),
+        mul_empty_absorb: S(3) * E() => E(),
+        mul_vecs: S(1) * S(1) => S(0) + S(2),
+        mul_scal_id: S(40) * S(0) => S(40),
+        mul_bivec_quadvec: S(2) * S(4) => S(2) + S(4) + S(6),
+        mul_trivec_quadvec: S(3) * S(4) => S(1) + S(3) + S(5) + S(7),
+        mul_trivec_pentavec: S(3) * S(5) => S(2) + S(4) + S(6) + S(8),
+        mul_vec_rotor: S(1) * (S(0) + S(2)) => S(1) + S(3),
+        range: GradeSet::range(4,6) => S(4) + S(5) + S(6),
         project: GradeSet::range(0,10).prj(GradeSet::range(4,6)) => GradeSet::range(4,6),
-        single_graded: (G(1) + G(1)).is_single_graded() => true,
-        not_single_graded: (G(1) + G(2)).is_single_graded() => false,
-        g_any_not_single_graded: G_NONE().is_single_graded() => false,
-        iter_grades: (G(1) + G(22) + G(10)).iter_grades().collect::<Vec<_>>() => vec![1,10,22],
+        single_graded: (S(1) + S(1)).is_single() => true,
+        not_single_graded: (S(1) + S(2)).is_single() => false,
+        empty_not_single_graded: E().is_single() => false,
+        iter_grades: (S(1) + S(22) + S(10)).iter().collect::<Vec<_>>() => vec![1,10,22],
         grades_affecting_mul:
-          G(0).grades_affecting_mul(&(G(1) + G(0) + G(2) + G(10)), &(G(0) + G(2) + G(6)))
-          => (G(0) + G(2), G(0) + G(2))
+          S(0).grades_affecting_mul(&(S(1) + S(0) + S(2) + S(10)), &(S(0) + S(2) + S(6)))
+          => (S(0) + S(2), S(0) + S(2))
     );
 }

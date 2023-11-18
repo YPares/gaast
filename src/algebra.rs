@@ -1,8 +1,8 @@
 //! Describe a geometric algebra over which computations may be done
-//! 
+//!
 //! An [`Algebra`] tells how many base vectors the underlying vector space has.
 //! A [`MetricAlgebra`] additionally tells how these base vectors multiply under
-//! the scalar product
+//! the dot product
 
 use crate::grade_set::Grade;
 
@@ -28,31 +28,6 @@ pub trait Algebra {
     }
 }
 
-/// A metric geometric algebra over some vector space
-pub trait MetricAlgebra: Algebra {
-    /// Give the scalar product of two base vectors (identified by index)
-    fn base_vec_scal_prod(&self, v1: usize, v2: usize) -> f64;
-}
-
-/// Representation of an [`Algebra`] as an array of orthogonal base vector squares
-impl<const D: usize> Algebra for [f64; D] {
-    fn vec_space_dim(&self) -> usize {
-        D
-    }
-}
-
-/// Representation of a [`MetricAlgebra`] as an array of orthogonal base vector
-/// squares
-impl<const D: usize> MetricAlgebra for [f64; D] {
-    fn base_vec_scal_prod(&self, v1: usize, v2: usize) -> f64 {
-        if v1 == v2 {
-            self[v1]
-        } else {
-            0.0
-        }
-    }
-}
-
 /// Computes n! / (k! * (n-k)!)
 pub(crate) const fn n_choose_k(n: Grade, k: Grade) -> usize {
     let mut res = n;
@@ -74,4 +49,55 @@ pub(crate) const fn n_choose_k(n: Grade, k: Grade) -> usize {
         i += 1;
     }
     res / k_fac
+}
+
+/// A metric geometric algebra over some vector space
+pub trait MetricAlgebra: Algebra {
+    /// Give the dot product of two base vectors (identified by index)
+    fn base_vec_dot(&self, v1: usize, v2: usize) -> f64;
+}
+
+/// Representation of an [`Algebra`] as an array of orthogonal base vector squares
+impl<const D: usize> Algebra for [f64; D] {
+    fn vec_space_dim(&self) -> usize {
+        D
+    }
+}
+
+/// Representation of a [`MetricAlgebra`] as an array of orthogonal base vector
+/// squares
+impl<const D: usize> MetricAlgebra for [f64; D] {
+    fn base_vec_dot(&self, v1: usize, v2: usize) -> f64 {
+        if v1 == v2 {
+            self[v1]
+        } else {
+            0.0
+        }
+    }
+}
+
+/// A [`MetricAlgebra`] over a euclidean vector space of some dimension N. Thus
+/// we have N orthogonal base vectors, each one squaring to 1
+///
+/// Therefore, `OrthoEuclidN(X)` represents the exact same algebra as `[1;
+/// X]`, only their representation (and therefore, size) in memory is different
+pub struct OrthoEuclidN(
+    /// Dimension N of the underlying vector space
+    pub usize,
+);
+
+impl Algebra for OrthoEuclidN {
+    fn vec_space_dim(&self) -> usize {
+        self.0
+    }
+}
+
+impl MetricAlgebra for OrthoEuclidN {
+    fn base_vec_dot(&self, v1: usize, v2: usize) -> f64 {
+        if v1 == v2 {
+            1.0
+        } else {
+            0.0
+        }
+    }
 }

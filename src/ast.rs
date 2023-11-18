@@ -123,6 +123,23 @@ macro_rules! unary_ops {
     }
 }
 
+impl<T: Graded> GAExpr<T> {
+    /// Create a GA expression from a raw input multivector value
+    pub fn val(x: T) -> Self {
+        Self::wrap(x.grade_set(), AstNode::Val(x))
+    }
+
+    /// To some floating-point power. `p` must therefore evaluate to a scalar.
+    /// Refer to [`Self::log`] for limitations
+    pub fn pow(self, p: GAExpr<T>) -> Self {
+        assert!(
+            p.grade_set().is_just(0),
+            "Pow can only be applied if the expression in exponent evaluates to a scalar"
+        );
+        GAExpr::exp(GAExpr::log(self) * p)
+    }
+}
+
 impl<T> GAExpr<T> {
     fn wrap(gs: GradeSet, ast: AstNode<Self, T>) -> Self {
         Self(Rc::new(GradedNode {
@@ -141,7 +158,7 @@ impl<T> GAExpr<T> {
 
     /// Grade projection: a.prj(k) = \<a\>_k
     pub fn prj(self, k: Grade) -> Self {
-        let gs = self.grade_set().clone().prj(GradeSet::g(k));
+        let gs = self.grade_set().clone().prj(GradeSet::single(k));
         Self::wrap(gs, Prj(self, k))
     }
 
@@ -208,23 +225,6 @@ impl<T> GAExpr<T> {
                 e2.apply_grade_hints();
             }
         }
-    }
-}
-
-impl<T: Graded> GAExpr<T> {
-    /// Create a GA expression from a raw value
-    pub fn val(x: T) -> Self {
-        Self::wrap(x.grade_set(), AstNode::Val(x))
-    }
-
-    /// To some floating-point power. `p` must therefore evaluate to a scalar.
-    /// Refer to [`Self::log`] for limitations
-    pub fn pow(self, p: GAExpr<T>) -> Self {
-        assert!(
-            p.grade_set().is_just(0),
-            "Pow can only be applied if the expression in exponent evaluates to a scalar"
-        );
-        GAExpr::exp(GAExpr::log(self) * p)
     }
 }
 

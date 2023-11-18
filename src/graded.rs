@@ -57,7 +57,7 @@ impl<T: GradedMut> GradedMut for Box<T> {
 
 impl Graded for f64 {
     fn grade_set(&self) -> GradeSet {
-        GradeSet::g(0)
+        GradeSet::single(0)
     }
     fn grade_slice(&self, k: Grade) -> &[f64] {
         assert!(k == 0);
@@ -71,52 +71,38 @@ impl GradedMut for f64 {
         std::slice::from_mut(self)
     }
     fn init_null_mv(_dim: usize, gs: &GradeSet) -> Self {
-        assert!(gs == &GradeSet::g(0));
+        assert!(gs == &GradeSet::single(0));
         0.0
     }
 }
 
-/// A Vec-based multivector representation
-pub struct DynSizedMV {
-    /// Contains the components of each grade
-    contents: HashMap<usize, Vec<f64>>,
-    /// Gives the grades contained in `contents`
-    grade_set: GradeSet,
-}
+/// A HashMap of Vecs raw multivector representation
+///
+/// Convenient for prototyping, but neither efficient nor compact in memory.
+/// Notably, just storing a scalar part (ie. just a [`f64`]) requires 2
+/// allocations (singleton hashmap and singleton vec)
+pub struct HashMapMV(pub HashMap<Grade, Vec<f64>>);
 
-impl DynSizedMV {
-    /// Create a [`DynSizedMV`] from its components, sorted by grade
-    pub fn from_map_of_comps(m: HashMap<usize, Vec<f64>>) -> Self {
-        Self {
-            grade_set: m
-                .keys()
-                .fold(GradeSet::g_none(), |acc, &k| acc + GradeSet::g(k)),
-            contents: m,
-        }
-    }
-}
-
-impl Graded for DynSizedMV {
+impl Graded for HashMapMV {
     fn grade_set(&self) -> GradeSet {
-        self.grade_set.clone()
+        self.0
+            .keys()
+            .fold(GradeSet::empty(), |acc, &k| acc.add_grade(k))
     }
     fn grade_slice(&self, k: Grade) -> &[f64] {
-        self.contents[&k].as_ref()
+        self.0[&k].as_ref()
     }
 }
 
-impl GradedMut for DynSizedMV {
+impl GradedMut for HashMapMV {
     fn grade_slice_mut(&mut self, k: Grade) -> &mut [f64] {
-        self.contents.get_mut(&k).unwrap()
+        self.0.get_mut(&k).unwrap()
     }
     fn init_null_mv(dim: usize, gs: &GradeSet) -> Self {
-        let mut res = DynSizedMV {
-            grade_set: gs.clone(),
-            contents: HashMap::new(),
-        };
-        for k in res.grade_set.iter_grades() {
-            res.contents.insert(k, vec![0.0; n_choose_k(dim, k)]);
+        let mut m = HashMap::new();
+        for k in gs.iter() {
+            m.insert(k, vec![0.0; n_choose_k(dim, k)]);
         }
-        res
+        Self(m)
     }
 }

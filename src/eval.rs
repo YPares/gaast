@@ -15,13 +15,13 @@ impl<T: Graded> GAExpr<T> {
     }
 
     fn add_to_res<R: GradedMut>(&self, ga: &impl MetricAlgebra, res: &mut R) {
-        if self.grade_set().has_no_grade() {
+        if self.grade_set().is_empty() {
             // self necessarily evaluates to zero, no need to go further
             return;
         }
         match self.ast_node() {
             Val(input) => {
-                for k in res.grade_set().iter_grades() {
+                for k in res.grade_set().iter() {
                     if input.grade_set().contains(k) {
                         let input_slice = input.grade_slice(k);
                         let res_slice = res.grade_slice_mut(k);
@@ -38,19 +38,19 @@ impl<T: Graded> GAExpr<T> {
             Mul(e1, e2) => {
                 let r1: R = e1.eval(ga);
                 let r2: R = e2.eval(ga);
-                for k in self.grade_set().iter_grades() {}
+                for k in self.grade_set().iter() {}
             }
             Exp(e) => todo!(),
             Log(e) => todo!(),
             Neg(e) => {
                 e.add_to_res(ga, res);
-                for k in self.grade_set().iter_grades() {
+                for k in self.grade_set().iter() {
                     res.negate_grade(k);
                 }
             }
             Rev(e) => {
                 e.add_to_res(ga, res);
-                for k in self.grade_set().iter_grades() {
+                for k in self.grade_set().iter() {
                     if (k * (k - 1) / 2) % 2 == 1 {
                         res.negate_grade(k);
                     }
@@ -58,7 +58,7 @@ impl<T: Graded> GAExpr<T> {
             }
             GInvol(e) => {
                 e.add_to_res(ga, res);
-                for k in self.grade_set().iter_grades() {
+                for k in self.grade_set().iter() {
                     if k % 2 == 1 {
                         res.negate_grade(k);
                     }
