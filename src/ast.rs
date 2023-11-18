@@ -1,7 +1,6 @@
 //! Represent a GA expression using an abstract syntax tree
 
-use super::grade_set::*;
-use super::graded::Graded;
+use super::{grade_set::*, graded::Graded};
 use std::cell::RefCell;
 use std::rc::Rc;
 use AstNode::*;
@@ -26,7 +25,7 @@ pub enum AstNode<E, T> {
     Log(E),
     /// Grade projection (or "grade extraction"). The grade to extract is stored
     /// here only for error-reporting reasons
-    Prj(E, usize),
+    Prj(E, Grade),
     /// Reverse (or "dagger")
     Rev(E),
     /// Grade involution (or main involution)
@@ -46,11 +45,11 @@ pub struct GradedNode<E, T> {
 }
 
 impl<E, T> GradedNode<E, T> {
-    /// Get the grade associated to this node
+    /// Get the [`GradeSet`] associated to this node
     pub fn grade_set(&self) -> impl std::ops::Deref<Target = GradeSet> + '_ {
         self.grade_set_cell.borrow()
     }
-    /// Get the part of this AST contained under this node
+    /// Get the node and the part of the AST it contains
     pub fn ast_node(&self) -> &AstNode<E, T> {
         &self.ast_node
     }
@@ -141,7 +140,7 @@ impl<T> GAExpr<T> {
     );
 
     /// Grade projection: a.prj(k) = \<a\>_k
-    pub fn prj(self, k: usize) -> Self {
+    pub fn prj(self, k: Grade) -> Self {
         let gs = self.grade_set().clone().prj(GradeSet::g(k));
         Self::wrap(gs, Prj(self, k))
     }

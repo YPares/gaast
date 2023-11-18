@@ -24,6 +24,9 @@ impl PartialEq for GradeSet {
     }
 }
 
+/// Grades are just regular positive integers. Alias introduced for clarity
+pub type Grade = usize;
+
 impl GradeSet {
     /// The `GradeSet` of _zero_. In GA, `0` is _polymorphic_: it's a scalar or
     /// any k-vector or linear combination of those at the same time. Whatever
@@ -35,14 +38,14 @@ impl GradeSet {
     }
 
     /// The grade of a k-vector
-    pub fn g(k: usize) -> Self {
+    pub fn g(k: Grade) -> Self {
         let mut v = bitvec![0; k + 1];
         v.set(k, true);
         GradeSet(v)
     }
 
     /// Grades ranging from x to y (incl)
-    pub fn range(x: usize, y: usize) -> Self {
+    pub fn range(x: Grade, y: Grade) -> Self {
         let mut v = bitvec![0; y + 1];
         for mut i in &mut v.as_mut_bitslice()[x..=y] {
             *i = true;
@@ -52,12 +55,12 @@ impl GradeSet {
 
     /// Grade projection: select part of the grades contained in self, using
     /// another GradeSet as a selector
-    pub fn prj(self, grades: Self) -> Self {
-        GradeSet(self.0 & grades.0)
+    pub fn prj(self, other: Self) -> Self {
+        GradeSet(self.0 & other.0)
     }
 
     /// Iterate over each grade present in the GradeSet
-    pub fn iter_grades(&self) -> impl Iterator<Item = usize> + '_ {
+    pub fn iter_grades(&self) -> impl Iterator<Item = Grade> + '_ {
         self.0.iter_ones()
     }
 
@@ -80,7 +83,7 @@ impl GradeSet {
     }
 
     /// Whether the GradeSet contains the grade k
-    pub fn contains(&self, k: usize) -> bool {
+    pub fn contains(&self, k: Grade) -> bool {
         match self.0.get(k) {
             None => false,
             Some(x) => *x,
@@ -88,12 +91,12 @@ impl GradeSet {
     }
 
     /// Whether the GradeSet contains only the grade k
-    pub fn is_just(&self, k: usize) -> bool {
+    pub fn is_just(&self, k: Grade) -> bool {
         self.contains(k) && self.is_single_graded()
     }
 
     /// Remove a grade from the set
-    pub fn rm_grade(mut self, k: usize) -> Self {
+    pub fn rm_grade(mut self, k: Grade) -> Self {
         if k < self.0.len() {
             self.0.set(k, false);
         }
@@ -188,7 +191,7 @@ impl std::ops::Mul for GradeSet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    const G: fn(usize) -> GradeSet = GradeSet::g;
+    const G: fn(Grade) -> GradeSet = GradeSet::g;
     const G_NONE: fn() -> GradeSet = GradeSet::g_none;
 
     macro_rules! test_eqs {

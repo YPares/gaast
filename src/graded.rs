@@ -1,7 +1,7 @@
 //! The [`Graded`] trait, for types that contain or allow to read graded data
 //! (raw multivectors)
 
-use super::grade_set::GradeSet;
+use super::{algebra::n_choose_k, grade_set::*};
 use std::{collections::HashMap, rc::Rc};
 
 /// The trait for all objects that are graded, ie. from which we can extract an
@@ -11,7 +11,7 @@ pub trait Graded {
     fn grade_set(&self) -> GradeSet;
     /// Get a slice to the components of the k-vector part, given k. The length
     /// of the slice must exactly correspond to what is expected for that grade
-    fn grade_slice(&self, k: usize) -> &[f64];
+    fn grade_slice(&self, k: Grade) -> &[f64];
 }
 
 /// The trait for all objects that are graded and writeable
@@ -23,11 +23,11 @@ pub trait GradedMut: Graded {
     /// Get a mutable slice to the components of the k-vector part, given k. The
     /// length of the slice must exactly correspond to what is expected for that
     /// grade
-    fn grade_slice_mut(&mut self, k: usize) -> &mut [f64];
+    fn grade_slice_mut(&mut self, k: Grade) -> &mut [f64];
     /// Multiply all the components of a given grade by -1
-    fn negate_grade(&mut self, k: usize) {
+    fn negate_grade(&mut self, k: Grade) {
         for x in self.grade_slice_mut(k) {
-            *x = - *x;
+            *x = -*x;
         }
     }
 }
@@ -38,7 +38,7 @@ macro_rules! Graded_blanket_impls {
             fn grade_set(&self) -> GradeSet {
                 (**self).grade_set()
             }
-            fn grade_slice(&self, k: usize) -> &[f64] {
+            fn grade_slice(&self, k: Grade) -> &[f64] {
                 (**self).grade_slice(k)
             }
         })*
@@ -47,7 +47,7 @@ macro_rules! Graded_blanket_impls {
 Graded_blanket_impls!(Rc, Box);
 
 impl<T: GradedMut> GradedMut for Box<T> {
-    fn grade_slice_mut(&mut self, k: usize) -> &mut [f64] {
+    fn grade_slice_mut(&mut self, k: Grade) -> &mut [f64] {
         (**self).grade_slice_mut(k)
     }
     fn init_null_mv(dim: usize, gs: &GradeSet) -> Self {
@@ -59,14 +59,14 @@ impl Graded for f64 {
     fn grade_set(&self) -> GradeSet {
         GradeSet::g(0)
     }
-    fn grade_slice(&self, k: usize) -> &[f64] {
+    fn grade_slice(&self, k: Grade) -> &[f64] {
         assert!(k == 0);
         std::slice::from_ref(self)
     }
 }
 
 impl GradedMut for f64 {
-    fn grade_slice_mut(&mut self, k: usize) -> &mut [f64] {
+    fn grade_slice_mut(&mut self, k: Grade) -> &mut [f64] {
         assert!(k == 0);
         std::slice::from_mut(self)
     }
@@ -100,13 +100,13 @@ impl Graded for DynSizedMV {
     fn grade_set(&self) -> GradeSet {
         self.grade_set.clone()
     }
-    fn grade_slice(&self, k: usize) -> &[f64] {
+    fn grade_slice(&self, k: Grade) -> &[f64] {
         self.contents[&k].as_ref()
     }
 }
 
 impl GradedMut for DynSizedMV {
-    fn grade_slice_mut(&mut self, k: usize) -> &mut [f64] {
+    fn grade_slice_mut(&mut self, k: Grade) -> &mut [f64] {
         self.contents.get_mut(&k).unwrap()
     }
     fn init_null_mv(dim: usize, gs: &GradeSet) -> Self {
@@ -119,27 +119,4 @@ impl GradedMut for DynSizedMV {
         }
         res
     }
-}
-
-/// Computes n! / (k! * (n-k)!)
-pub(crate) const fn n_choose_k(n: usize, k: usize) -> usize {
-    let mut res = n;
-    let mut i = n - k + 1;
-    loop {
-        if i >= n {
-            break;
-        }
-        res *= i;
-        i += 1;
-    }
-    let mut k_fac = k;
-    let mut i = 2;
-    loop {
-        if i >= k {
-            break;
-        }
-        k_fac *= i;
-        i += 1;
-    }
-    res / k_fac
 }

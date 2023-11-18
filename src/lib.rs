@@ -9,47 +9,12 @@
 //! [`GAExpr`] is agnostic over which type is actually used to store input
 //! multivectors. This is achived via the [`Graded`] trait.
 
+pub mod algebra;
 pub mod ast;
 pub mod eval;
 pub mod grade_set;
 pub mod graded;
 
 pub use ast::GAExpr;
+pub use grade_set::{Grade, GradeSet};
 pub use graded::{DynSizedMV, Graded};
-
-macro_rules! pub_all {
-    (
-        $(#[$meta:meta])*
-        struct $name:ident {
-            $(
-                $field:ident : $typ:ty
-            ),*
-        }
-    ) => {
-        $(#[$meta])*
-        pub struct $name {
-            $(
-                pub $field : $typ
-            ),*
-        }
-    };
-}
-macro_rules! pub_crate_all {
-    (
-        $(#[$meta:meta])*
-        struct $name:ident {
-            $(
-                $field:ident : $typ:ty
-            ),*
-        }
-    ) => {
-        $(#[$meta])*
-        pub(crate) struct $name {
-            $(
-                pub(crate) $field : $typ
-            ),*
-        }
-    };
-}
-pub(crate) use pub_all;
-pub(crate) use pub_crate_all;
