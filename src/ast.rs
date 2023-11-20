@@ -77,10 +77,15 @@ impl<E, T> GradedNode<E, T> {
 /// having to evaluate it. This is represented by a [`GradeSet`] which can then
 /// be further restrained depending on the use sites of this GAExpr, and then
 /// used to optimize allocations while evaluating the expression
-///
-/// Uses [`Rc`] internally, so you can safely clone it extensively.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct GAExpr<T>(Rc<GradedNode<Self, T>>);
+
+/// [`GAExpr`] uses [`Rc`] internally, so you can safely clone it extensively
+impl<T> Clone for GAExpr<T> {
+    fn clone(&self) -> Self {
+        GAExpr(Rc::clone(&self.0))
+    }
+}
 
 impl<T> std::ops::Deref for GAExpr<T> {
     type Target = GradedNode<Self, T>;
@@ -109,9 +114,12 @@ impl<T> std::ops::Mul for GAExpr<T> {
 impl<T: Graded> GAExpr<T> {
     /// Create a GA expression from a raw input multivector value
     pub fn val(x: T) -> Self {
-        Self::wrap(x.grade_set().borrow().clone(), AstNode::Val(x))
+        let gs = x.grade_set().borrow().clone();
+        Self::wrap(gs, AstNode::Val(x))
     }
+}
 
+impl<T> GAExpr<T> {
     /// Raise to some power. Shortcut for `exp(log(self) * p)`, usually with `p`
     /// evaluating to a scalar. Therefore, please refer to [`Self::log`] and
     /// [`Self::exp`] for limitations
@@ -227,9 +235,7 @@ impl<T> GAExpr<T> {
             }
         }
     }
-}
 
-impl<T: Clone> GAExpr<T> {
     /// Inverse. Just a shortcut for `self.clone().rev() * self.norm_sq().inv()`
     pub fn inv(self) -> Self {
         if self.grade_set().is_just(0) {

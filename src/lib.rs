@@ -6,11 +6,11 @@
 //! [`GAExpr`], which exposes methods for the geometric algebra primitives.
 //!
 //! [`GAExpr`] is agnostic over which types are actually used to store input and
-//! result multivectors. This is achived via the [`Graded`] and
-//! [`graded::GradedMut`] traits. It is also agnostic over which actual vector
-//! space is used (both in terms of dimension and metric), via the
-//! [`algebra::MetricAlgebra`] trait. The only hard requirement is that this
-//! vector space must be over the field of reals ([`f64`] here).
+//! result multivectors. This is achived via the [`Graded`] trait and its
+//! subtraits. It is also agnostic over which actual vector space is used (both
+//! in terms of dimension and metric), via the [`algebra::MetricAlgebra`] trait.
+//! The only hard requirement is that this vector space must be over the field
+//! of reals ([`f64`] here).
 //!
 //! Computing GA expressions with `gaast` is done fully at runtime, in 3 phases:
 //!

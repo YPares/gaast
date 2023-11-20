@@ -4,18 +4,18 @@ use super::{algebra::MetricAlgebra, ast::*, graded::*};
 use std::borrow::Borrow as _;
 use AstNode as N;
 
-impl<T: Graded> GAExpr<T> {
+impl<T: GradedInput> GAExpr<T> {
     /// Evaluates a [`GAExpr`]. The given [`MetricAlgebra`] must make sense with
     /// respect to the input values contained in the [`GAExpr`], in terms of
     /// possible grades contained in those input values, and of number of
     /// components for each grade
-    pub fn eval<R: GradedMut>(&self, ga: &impl MetricAlgebra) -> R {
+    pub fn eval<R: GradedOutput>(&self, ga: &impl MetricAlgebra) -> R {
         let mut res = R::init_null_mv(ga.vec_space_dim(), &self.grade_set());
         self.add_to_res(ga, &mut res);
         res
     }
 
-    fn add_to_res<R: GradedMut>(&self, ga: &impl MetricAlgebra, res: &mut R) {
+    fn add_to_res<R: GradedOutput>(&self, ga: &impl MetricAlgebra, res: &mut R) {
         if self.grade_set().is_empty() {
             // self necessarily evaluates to zero, no need to go further
             return;
@@ -23,7 +23,8 @@ impl<T: Graded> GAExpr<T> {
         match self.ast_node() {
             N::Val(input) => {
                 let igs = input.grade_set();
-                for k in res.grade_set().borrow().iter() {
+                let rgs = res.grade_set().borrow().clone();
+                for k in rgs.iter() {
                     if igs.borrow().contains(k) {
                         let input_slice = input.grade_slice(k);
                         let res_slice = res.grade_slice_mut(k);
