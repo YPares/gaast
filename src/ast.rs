@@ -64,7 +64,7 @@ impl<E, T> GradedNode<E, T> {
         match self.grade_set_hints.borrow().as_ref() {
             Some(hints) => {
                 self.grade_set_cell
-                    .replace_with(|g| g.clone().and(hints.clone()));
+                    .replace_with(|g| g.clone() & hints.clone());
             }
             None => {}
         };
@@ -111,8 +111,23 @@ impl<T> std::ops::Mul for GAExpr<T> {
     }
 }
 
+impl<T> std::ops::Neg for GAExpr<T> {
+    type Output = Self;
+    fn neg(self) -> Self {
+        let gs = self.grade_set().clone();
+        Self::wrap(gs, N::Neg(self))
+    }
+}
+
+impl<T> std::ops::Sub for GAExpr<T> {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self::Output {
+        self + -rhs
+    }
+}
+
 impl<T: Graded> GAExpr<T> {
-    /// Create a GA expression from a raw input multivector value
+    /// Create a GA expression that just evaluates to some [`Graded`] value
     pub fn val(x: T) -> Self {
         let gs = x.grade_set().borrow().clone();
         Self::wrap(gs, AstNode::Val(x))
@@ -161,7 +176,7 @@ impl<T> GAExpr<T> {
 
     /// Grade projection: a.prj(k) = \<a\>_k
     pub fn prj(self, k: Grade) -> Self {
-        let gs = self.grade_set().clone().and(GradeSet::single(k));
+        let gs = self.grade_set().clone() & GradeSet::single(k);
         Self::wrap(gs, N::Prj(self, k))
     }
 
@@ -250,20 +265,5 @@ impl<T> GAExpr<T> {
     /// Norm squared. Just a shortcut for `(self.clone().rev() * self).prj(0)`
     pub fn norm_sq(self) -> Self {
         self.clone().scal(self)
-    }
-}
-
-impl<T: Graded + Clone> std::ops::Neg for GAExpr<T> {
-    type Output = Self;
-    fn neg(self) -> Self {
-        let gs = self.grade_set().clone();
-        Self::wrap(gs, N::Neg(self))
-    }
-}
-
-impl<T: Graded + Clone> std::ops::Sub for GAExpr<T> {
-    type Output = Self;
-    fn sub(self, rhs: Self) -> Self::Output {
-        self + -rhs
     }
 }

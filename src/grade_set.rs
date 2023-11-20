@@ -60,15 +60,6 @@ impl GradeSet {
         GradeSet(v)
     }
 
-    /// GradeSet intersection: select the grades contained in both `self` and
-    /// `other`. You can think of it as grade projection (extraction) performed
-    /// on `self`, using `other` as the set of grades to keep
-    pub fn and(self, other: Self) -> Self {
-        GradeSet(self.0 & other.0)
-        // Note: the resulting bitvec will always have the same length as
-        // `self.0`
-    }
-
     /// Iterate over each grade present in the GradeSet
     pub fn iter(&self) -> impl Iterator<Item = Grade> + '_ {
         self.0.iter_ones()
@@ -156,7 +147,7 @@ impl GradeSet {
         let mut rb = Self::empty();
         for ka in a.iter() {
             for kb in b.iter() {
-                if self.clone().and(Self::single(ka) * Self::single(kb)).0.any() {
+                if (self.clone() & (Self::single(ka) * Self::single(kb))).0.any() {
                     // The product of ka and kb yields at least one grade that
                     // is in self
                     ra = ra + Self::single(ka);
@@ -184,6 +175,18 @@ impl std::ops::Add for GradeSet {
     fn add(self, rhs: Self) -> Self::Output {
         let (small, big) = sort_by_len(self.0, rhs.0);
         GradeSet(big | small)
+    }
+}
+
+/// GradeSet intersection: select the grades contained in both `self` and `rhs`.
+/// You can think of it as grade projection (extraction) performed on `self`,
+/// using `rhs` as the set of grades to keep
+impl std::ops::BitAnd for GradeSet {
+    type Output = GradeSet;
+    fn bitand(self, rhs: Self) -> Self::Output {
+        GradeSet(self.0 & rhs.0)
+        // Note: the resulting bitvec will always have the same length as
+        // `self.0`
     }
 }
 
@@ -247,7 +250,7 @@ mod tests {
         mul_trivec_pentavec: S(3) * S(5) => S(2) + S(4) + S(6) + S(8),
         mul_vec_rotor: S(1) * (S(0) + S(2)) => S(1) + S(3),
         range: GradeSet::range(4,6) => S(4) + S(5) + S(6),
-        project: GradeSet::range(0,10).and(GradeSet::range(4,6)) => GradeSet::range(4,6),
+        intersect: GradeSet::range(0,10) & GradeSet::range(4,6) => GradeSet::range(4,6),
         single_graded: (S(1) + S(1)).is_single() => true,
         not_single_graded: (S(1) + S(2)).is_single() => false,
         empty_not_single_graded: E().is_single() => false,
