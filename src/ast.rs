@@ -222,7 +222,7 @@ impl<T> GAExpr<T> {
                 // Find in e1 and e2 which grades, once multiplied, will affect
                 // the grades in `wanted`
                 let (e1_wanted, e2_wanted) =
-                    wanted.grades_affecting_mul(&e1.grade_set(), &e2.grade_set());
+                    wanted.parts_contributing_to_mul(&e1.grade_set(), &e2.grade_set());
                 e1.propagate_grade_hints(&e1_wanted);
                 e2.propagate_grade_hints(&e2_wanted);
             }

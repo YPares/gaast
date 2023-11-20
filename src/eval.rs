@@ -9,13 +9,19 @@ impl<T: GradedInput> GAExpr<T> {
     /// respect to the input values contained in the [`GAExpr`], in terms of
     /// possible grades contained in those input values, and of number of
     /// components for each grade
-    pub fn eval<R: GradedOutput>(&self, ga: &impl MetricAlgebra) -> R {
+    pub fn eval<R>(&self, ga: &impl MetricAlgebra) -> R
+    where
+        R: GradedInput + GradedOutput,
+    {
         let mut res = R::init_null_mv(ga.vec_space_dim(), &self.grade_set());
         self.add_to_res(ga, &mut res);
         res
     }
 
-    fn add_to_res<R: GradedOutput>(&self, ga: &impl MetricAlgebra, res: &mut R) {
+    fn add_to_res<R>(&self, ga: &impl MetricAlgebra, res: &mut R)
+    where
+        R: GradedInput + GradedOutput,
+    {
         if self.grade_set().is_empty() {
             // self necessarily evaluates to zero, no need to go further
             return;
@@ -23,7 +29,7 @@ impl<T: GradedInput> GAExpr<T> {
         match self.ast_node() {
             N::Val(input) => {
                 let igs = input.grade_set();
-                let rgs = res.grade_set().borrow().clone();
+                let rgs = self.grade_set().clone();
                 for k in rgs.iter() {
                     if igs.borrow().contains(k) {
                         let input_slice = input.grade_slice(k);
@@ -34,9 +40,9 @@ impl<T: GradedInput> GAExpr<T> {
                     }
                 }
             }
-            N::Add(e1, e2) => {
-                e1.add_to_res(ga, res);
-                e2.add_to_res(ga, res);
+            N::Add(e_left, e_right) => {
+                e_left.add_to_res(ga, res);
+                e_right.add_to_res(ga, res);
             }
             N::Neg(e) => {
                 e.add_to_res(ga, res);
@@ -68,12 +74,14 @@ impl<T: GradedInput> GAExpr<T> {
             N::Prj(e, _) => {
                 e.add_to_res(ga, res);
             }
-            // NAIVE IMPLEMENTATION FOR NOW
-            N::Mul(e1, e2) => {
-                let r1: R = e1.eval(ga);
-                let r2: R = e2.eval(ga);
-                for k in res.grade_set().borrow().iter() {
-                    todo!()
+            N::Mul(e_left, e_right) => {
+                let r_left: R = e_left.eval(ga);
+                let r_right: R = e_right.eval(ga);
+                for (partial_gs, k_left, k_right) in self
+                    .grade_set()
+                    .iter_contributions_to_mul(&e_left.grade_set(), &e_right.grade_set())
+                {
+                    
                 }
             }
             N::Exp(e) => todo!(),

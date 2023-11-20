@@ -12,7 +12,7 @@ use bitvec::prelude::*;
 /// are provided (like exp & log), with some limitations indicated in the
 /// methods' documentation. This allows to perform _grade inference_ on
 /// multivector expressions _without_ having to actually compute them.
-/// 
+///
 /// Implementation notes: This is implemented using a heap-allocated BitVec (not
 /// a "big enough" statically-sized type like u64) in order to be truly agnostic
 /// of the underlying vec space dimensionality N, and therefore of the final
@@ -61,7 +61,7 @@ impl GradeSet {
     }
 
     /// Iterate over each grade present in the GradeSet
-    pub fn iter(&self) -> impl Iterator<Item = Grade> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = Grade> + Clone + '_ {
         self.0.iter_ones()
     }
 
@@ -99,7 +99,7 @@ impl GradeSet {
     /// Add a grade to the set
     pub fn add_grade(mut self, k: Grade) -> Self {
         if k >= self.0.len() {
-            self.0.resize(k+1, false);
+            self.0.resize(k + 1, false);
         }
         self.0.set(k, true);
         self
@@ -136,26 +136,35 @@ impl GradeSet {
         other_grade
     }
 
-    /// Returns `a` and `b` restricted to their grades that will, when
-    /// multiplied, affect those of `self`
-    /// 
-    /// NAIVE GREEDY IMPLEMENTATION FOR NOW. Though its usage is limited to the
-    /// AST grade minimisation phase (downwards grade inference), therefore this
-    /// method is not used when actually evaluating a GA expression
-    pub fn grades_affecting_mul(&self, a: &Self, b: &Self) -> (Self, Self) {
-        let mut ra = Self::empty();
-        let mut rb = Self::empty();
-        for ka in a.iter() {
-            for kb in b.iter() {
-                if (self.clone() & (Self::single(ka) * Self::single(kb))).0.any() {
-                    // The product of ka and kb yields at least one grade that
-                    // is in self
-                    ra = ra + Self::single(ka);
-                    rb = rb + Self::single(kb);
-                }
-            }
+    /// Using `self` as a geometric product result, yields all the pairs of
+    /// grades in `left` and `right` that will, when multiplied, contribute to
+    /// at least one of the grades contained in self.
+    ///
+    /// Each element yielded is of the form (resulting_part_of_self,
+    /// grade_in_left, grade_in_right)
+    ///
+    /// GREEDY O(N^2) IMPLEMENTATION FOR NOW
+    pub fn iter_contributions_to_mul<'a>(
+        &'a self,
+        left: &'a Self,
+        right: &'a Self,
+    ) -> impl Iterator<Item = (GradeSet, Grade, Grade)> + Clone + 'a {
+        let contribs = |kl, kr| self.clone() & (Self::single(kl) * Self::single(kr));
+        left.iter()
+            .flat_map(move |kl| right.iter().map(move |kr| (contribs(kl, kr), kl, kr)))
+            .filter(|(GradeSet(bits), _, _)| bits.any())
+    }
+
+    /// Uses [`Self::iter_contributions_to_mul`] to collect
+    /// (contributing_grades_in_left, contributing_grades_in_right)
+    pub fn parts_contributing_to_mul(&self, left: &Self, right: &Self) -> (Self, Self) {
+        let mut filtered_left = GradeSet::empty();
+        let mut filtered_right = GradeSet::empty();
+        for (_, k_left, k_right) in self.iter_contributions_to_mul(left, right) {
+            filtered_left = filtered_left.add_grade(k_left);
+            filtered_right = filtered_right.add_grade(k_right);
         }
-        (ra, rb)
+        (filtered_left, filtered_right)
     }
 }
 
@@ -243,20 +252,22 @@ mod tests {
         add_self_id: S(3) + S(3) => S(3),
         add_empty_id: S(3) + E() => S(3),
         mul_empty_absorb: S(3) * E() => E(),
-        mul_vecs: S(1) * S(1) => S(0) + S(2),
         mul_scal_id: S(40) * S(0) => S(40),
+        mul_vecs: S(1) * S(1) => S(0) + S(2),
         mul_bivec_quadvec: S(2) * S(4) => S(2) + S(4) + S(6),
         mul_trivec_quadvec: S(3) * S(4) => S(1) + S(3) + S(5) + S(7),
         mul_trivec_pentavec: S(3) * S(5) => S(2) + S(4) + S(6) + S(8),
         mul_vec_rotor: S(1) * (S(0) + S(2)) => S(1) + S(3),
-        range: GradeSet::range(4,6) => S(4) + S(5) + S(6),
-        intersect: GradeSet::range(0,10) & GradeSet::range(4,6) => GradeSet::range(4,6),
+        range: GradeSet::range(4,7) => S(4) + S(5) + S(6) + S(7),
+        intersect: GradeSet::range(0,10) & GradeSet::range(4,30) => GradeSet::range(4,10),
         single_graded: (S(1) + S(1)).is_single() => true,
         not_single_graded: (S(1) + S(2)).is_single() => false,
         empty_not_single_graded: E().is_single() => false,
+        empty_intersection_is_empty: (S(0) & S(1)).is_empty() => true,
         iter_grades: (S(1) + S(22) + S(10)).iter().collect::<Vec<_>>() => vec![1,10,22],
-        grades_affecting_mul:
-          S(0).grades_affecting_mul(&(S(1) + S(0) + S(2) + S(10)), &(S(0) + S(2) + S(6)))
+        parts_contributing_to_mul:
+          S(0).parts_contributing_to_mul( &(S(1) + S(0) + S(2) + S(10))
+                                        , &(S(0) + S(2) + S(6)) )
           => (S(0) + S(2), S(0) + S(2))
     );
 }

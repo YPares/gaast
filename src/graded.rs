@@ -1,5 +1,6 @@
-//! The [`Graded`] trait, for types that contain or allow to read graded data
-//! (raw multivectors)
+//! The [`Graded`] trait, for types that contain graded data or act as
+//! placeholders for graded data, and its subtypes to read and write grade
+//! components (slices)
 
 use super::{algebra::n_choose_k, grade_set::*};
 use std::{collections::HashMap, rc::Rc};
@@ -17,7 +18,7 @@ pub trait Graded {
     fn grade_set<'a>(&'a self) -> Self::GradeSetOrRef<'a>;
 }
 
-/// The identity implementation, a [`GradeSet`] just returns a reference to
+/// The identity implementation. A [`GradeSet`] just returns a reference to
 /// itself
 impl Graded for GradeSet {
     type GradeSetOrRef<'a> = &'a Self;
