@@ -3,7 +3,7 @@
 //! components (slices)
 
 use super::{algebra::n_choose_k, grade_set::*};
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 /// The trait for all objects from which we can query grades
 pub trait Graded {
@@ -71,7 +71,7 @@ macro_rules! Graded_blanket_impls {
         )*
     };
 }
-Graded_blanket_impls!(Rc, Box);
+Graded_blanket_impls!(Box, Rc, Arc);
 
 impl<T: GradedOutput> GradedOutput for Box<T> {
     fn grade_slice_mut(&mut self, k: Grade) -> &mut [f64] {
@@ -79,6 +79,9 @@ impl<T: GradedOutput> GradedOutput for Box<T> {
     }
     fn init_null_mv(dim: usize, gs: &GradeSet) -> Self {
         Box::new(T::init_null_mv(dim, &gs))
+    }
+    fn negate_grade(&mut self, k: Grade) {
+        (**self).negate_grade(k);
     }
 }
 
@@ -110,6 +113,7 @@ impl GradedOutput for f64 {
 /// Convenient for prototyping, but neither efficient nor compact in memory.
 /// Notably, just storing a scalar part (ie. just a [`f64`]) requires 2
 /// allocations (singleton hashmap and singleton vec)
+#[derive(Debug, PartialEq)]
 pub struct HashMapMV(pub HashMap<Grade, Vec<f64>>);
 
 impl Graded for HashMapMV {
@@ -135,5 +139,33 @@ impl GradedOutput for HashMapMV {
             m.insert(k, vec![0.0; n_choose_k(dim, k)]);
         }
         Self(m)
+    }
+}
+
+#[macro_export]
+macro_rules! hash_map_mv {
+    ($($grade:expr => $($x:expr)+),+) => {{
+        let mut m = std::collections::HashMap::new();
+        $({
+            let mut v = Vec::new();
+            $(
+                v.push($x as f64);
+            )+
+            m.insert($grade, v);
+        })+
+        crate::graded::HashMapMV(m)
+    }}
+}
+pub use hash_map_mv;
+
+#[cfg(test)]
+mod tests {
+    use super::hash_map_mv;
+
+    #[test]
+    fn hash_map_mv_eq() {
+        let a = hash_map_mv!(1 => 1 2 3);
+        let b = hash_map_mv!(1 => 1 2 3);
+        assert_eq!(a, b);
     }
 }

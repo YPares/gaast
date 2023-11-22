@@ -64,5 +64,5 @@ pub use ast::GAExpr;
 pub use grade_set::{Grade, GradeSet};
 pub use graded::Graded;
 
-#[cfg(feature = "basic_eval")]
+#[cfg(feature = "eval")]
 mod eval;

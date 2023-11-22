@@ -175,14 +175,14 @@ impl<T> GAExpr<T> {
     );
 
     /// Grade projection: a.prj(k) = \<a\>_k
-    pub fn prj(self, k: Grade) -> Self {
+    pub fn g(self, k: Grade) -> Self {
         let gs = self.grade_set().clone() & GradeSet::single(k);
         Self::wrap(gs, N::Prj(self, k))
     }
 
     /// Scalar product. Just a shortcut for `(self.rev() * rhs).prj(0)`
     pub fn scal(self, rhs: Self) -> Self {
-        (self.rev() * rhs).prj(0)
+        (self.rev() * rhs).g(0)
     }
 
     /// Clifford conjugate. Just a shortcut for `self.rev().ginvol()`
