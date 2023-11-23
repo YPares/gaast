@@ -229,26 +229,17 @@ impl std::ops::Mul for GradeSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_macros::*;
+
     const S: fn(Grade) -> GradeSet = GradeSet::single;
     const E: fn() -> GradeSet = GradeSet::empty;
-
-    macro_rules! test_eqs {
-        ($($test_name:ident : $a:expr => $b:expr),*) => {
-            $(
-                #[test]
-                fn $test_name() {
-                    assert_eq!($a, $b);
-                }
-            )*
-        }
-    }
 
     #[test]
     fn neq() {
         assert_ne!(S(3), S(4))
     }
 
-    test_eqs!(
+    simple_eqs! {
         add_self_id: S(3) + S(3) => S(3),
         add_empty_id: S(3) + E() => S(3),
         mul_empty_absorb: S(3) * E() => E(),
@@ -269,5 +260,5 @@ mod tests {
           S(0).parts_contributing_to_mul( &(S(1) + S(0) + S(2) + S(10))
                                         , &(S(0) + S(2) + S(6)) )
           => (S(0) + S(2), S(0) + S(2))
-    );
+    }
 }

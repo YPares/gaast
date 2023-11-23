@@ -110,13 +110,13 @@ impl GradedOutput for f64 {
 
 /// A HashMap of Vecs raw multivector representation
 ///
-/// Convenient for prototyping, but neither efficient nor compact in memory.
+/// Convenient for testing, but neither efficient nor compact in memory.
 /// Notably, just storing a scalar part (ie. just a [`f64`]) requires 2
 /// allocations (singleton hashmap and singleton vec)
 #[derive(Debug, PartialEq)]
-pub struct HashMapMV(pub HashMap<Grade, Vec<f64>>);
+pub struct GradeMapMV(pub HashMap<Grade, Vec<f64>>);
 
-impl Graded for HashMapMV {
+impl Graded for GradeMapMV {
     type GradeSetOrRef<'a> = GradeSet;
     fn grade_set(&self) -> Self::GradeSetOrRef<'_> {
         self.0
@@ -124,12 +124,12 @@ impl Graded for HashMapMV {
             .fold(GradeSet::empty(), |acc, &k| acc.add_grade(k))
     }
 }
-impl GradedInput for HashMapMV {
+impl GradedInput for GradeMapMV {
     fn grade_slice(&self, k: Grade) -> &[f64] {
         &self.0[&k]
     }
 }
-impl GradedOutput for HashMapMV {
+impl GradedOutput for GradeMapMV {
     fn grade_slice_mut(&mut self, k: Grade) -> &mut [f64] {
         self.0.get_mut(&k).unwrap()
     }
@@ -143,7 +143,12 @@ impl GradedOutput for HashMapMV {
 }
 
 #[macro_export]
-macro_rules! hash_map_mv {
+/// A macro to create a [`GradeMapMV`], for instance in Cl(3):
+///
+/// `grade_map_mv!(0 => 1, 1 => 1 1 0, 3 => 1)`
+///
+/// this has a scalar part, a vector part, and a trivector part
+macro_rules! grade_map_mv {
     ($($grade:expr => $($x:expr)+),+) => {{
         let mut m = std::collections::HashMap::new();
         $({
@@ -153,19 +158,17 @@ macro_rules! hash_map_mv {
             )+
             m.insert($grade, v);
         })+
-        crate::graded::HashMapMV(m)
+        crate::graded::GradeMapMV(m)
     }}
 }
-pub use hash_map_mv;
+pub use grade_map_mv;
 
 #[cfg(test)]
 mod tests {
-    use super::hash_map_mv;
+    use super::grade_map_mv;
+    use crate::test_macros::*;
 
-    #[test]
-    fn hash_map_mv_eq() {
-        let a = hash_map_mv!(1 => 1 2 3);
-        let b = hash_map_mv!(1 => 1 2 3);
-        assert_eq!(a, b);
+    simple_eqs! {
+        hash_map_mv_eq: grade_map_mv!(1 => 1 2 3) => grade_map_mv!(1 => 1 2 3)
     }
 }

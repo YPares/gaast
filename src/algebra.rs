@@ -4,7 +4,7 @@
 //! A [`MetricAlgebra`] additionally tells how these base vectors multiply under
 //! the dot product
 
-use crate::grade_set::Grade;
+use crate::{grade_set::Grade, graded::GradedOutput, GAExpr, GradeSet};
 use bitvec::prelude::*;
 use num_bigint::BigUint;
 
@@ -47,7 +47,7 @@ pub struct BasisBlade(BitVec<u8>);
 impl std::fmt::Debug for BasisBlade {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for b in &self.0 {
-            f.write_str(if *b {"1"} else {"0"})?;
+            f.write_str(if *b { "1" } else { "0" })?;
         }
         Ok(())
     }
@@ -74,7 +74,8 @@ impl<A> std::ops::Deref for ReadyAlgebra<A> {
 }
 
 impl<A: Algebra> ReadyAlgebra<A> {
-    pub fn prepare(alg: A) -> Self {
+    /// Prepare an Algebra so it is ready to be used for evaluating expressions
+    pub fn from(alg: A) -> Self {
         // Give a name (as a bitfield) to each basis blade of the algebra. This
         // follows the convention described in `Dorst, L., Fontijne, D., & Mann,
         // S. (2010). Geometric algebra for computer science: an object-oriented
@@ -171,6 +172,18 @@ impl<const D: usize> MetricAlgebra for [f64; D] {
     }
 }
 
+impl<const D: usize> ReadyAlgebra<[f64; D]> {
+    /// Return the base vectors of the algebra, whose number can be known
+    /// statically here
+    pub fn base_vec_exprs<T: GradedOutput>(&self) -> [GAExpr<T>; D] {
+        array_init::array_init(|i| {
+            let mut v = T::init_null_mv(D, &GradeSet::single(1));
+            v.grade_slice_mut(1)[i] = 1.0;
+            GAExpr::val(v)
+        })
+    }
+}
+
 /// A [`MetricAlgebra`] over a euclidean vector space of some dimension N. Thus
 /// we have N orthogonal base vectors, each one squaring to 1
 ///
@@ -202,6 +215,9 @@ impl MetricAlgebra for OrthoEuclidN {
 
 /// Computes n! / (k! * (n-k)!)
 pub(crate) const fn n_choose_k(n: Grade, k: Grade) -> usize {
+    if k <= 0 {
+        return 1;
+    };
     let mut res = n;
     let mut i = n - k + 1;
     loop {
@@ -211,7 +227,7 @@ pub(crate) const fn n_choose_k(n: Grade, k: Grade) -> usize {
         res *= i;
         i += 1;
     }
-    let mut k_fac = if k == 0 { 1 } else { k };
+    let mut k_fac = k;
     let mut i = 2;
     loop {
         if i >= k {
@@ -238,20 +254,11 @@ pub(crate) const fn n_choose_k(n: Grade, k: Grade) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use bitvec::prelude::*;
-    use num_bigint::BigUint;
+    use super::*;
+    use crate::test_macros::*;
 
-    #[test]
-    fn bla() {
-        assert!(BigUint::from(1u32) & BigUint::from(8u32) == BigUint::from(0u32));
-    }
-    #[test]
-    fn plop() {
-        let mut b = BitVec::<u8>::from_vec(BigUint::from(259u16).to_bytes_le());
-        let c = bitvec![u8, Lsb0; 1; 8];
-        b.shift_left(1);
-        let x = b.get(0);
-        println!("B: {x:?}");
-        assert_eq!(b, c)
+    simple_eqs! {
+        n_choose_zero: n_choose_k(5, 0) => 1,
+        three_choose_two: n_choose_k(3, 2) => 3
     }
 }

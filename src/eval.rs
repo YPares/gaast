@@ -114,17 +114,48 @@ impl<T: GradedInput> GAExpr<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{algebra::{ReadyAlgebra, OrthoEuclidN}, graded::HashMapMV, hash_map_mv, GAExpr};
+    use crate::{algebra::*, grade_map_mv, graded::GradeMapMV};
+    use rstest::*;
 
-    const V: fn(HashMapMV) -> GAExpr<HashMapMV> = GAExpr::val;
+    macro_rules! expr_eq {
+        ($geom:ident, $a:expr, $b:expr) => {{
+            let a = $a;
+            let b = $b;
+            //assert_eq!(a.eval::<GradeMapMV>(&$geom), b);
+            assert_eq!(a.minimize_grades().eval::<GradeMapMV>(&$geom), b);
+        }};
+    }
 
-    #[test]
-    fn vecs_to_bivec() {
-        let a = hash_map_mv!(1 => 0 1 0);
-        let b = hash_map_mv!(1 => 1 0 0);
-        let alg = ReadyAlgebra::prepare(OrthoEuclidN(3));
-        let e = (V(a) * V(b)).g(2);
-        let r: HashMapMV = e.resolve_minimum_grades().eval(&alg);
-        assert_eq!(r, hash_map_mv!(2 => -1 0 0));
+    //type Ex = GAExpr<GradeMapMV>;
+    //const V: fn(GradeMapMV) -> Ex = GAExpr::val;
+
+    type Ega3 = ReadyAlgebra<[f64; 3]>;
+    #[fixture]
+    fn ega3() -> Ega3 {
+        ReadyAlgebra::from([1.0, 1.0, 1.0])
+    }
+
+    type Pga2 = ReadyAlgebra<[f64; 3]>;
+    #[fixture]
+    fn pga2() -> Pga2 {
+        ReadyAlgebra::from([0.0, 1.0, 1.0])
+    }
+
+    #[rstest]
+    fn vecs_to_bivec(ega3: Ega3) {
+        let [e1, e2, _] = ega3.base_vec_exprs::<GradeMapMV>();
+        expr_eq!(ega3, (e2 * e1).g(2), grade_map_mv!(2 => -1 0 0));
+    }
+
+    #[rstest]
+    fn vecs_to_trivec(ega3: Ega3) {
+        let [e1, e2, e3] = ega3.base_vec_exprs::<GradeMapMV>();
+        expr_eq!(ega3, (e2 * e1 * e3).g(3), grade_map_mv!(3 => -1));
+    }
+
+    #[rstest]
+    fn pga(pga2: Pga2) {
+        let [e0, _, _] = pga2.base_vec_exprs::<GradeMapMV>();
+        expr_eq!(pga2, (e0.clone() * e0).g(0), grade_map_mv!(0 => 0))
     }
 }

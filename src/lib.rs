@@ -66,3 +66,21 @@ pub use graded::Graded;
 
 #[cfg(feature = "eval")]
 mod eval;
+
+#[cfg(test)]
+pub(crate) mod test_macros {
+    macro_rules! simple_eqs {
+        {$($test_name:ident : $a:expr => $b:expr),+} => {
+          mod simple_eqs {
+            use super::*;
+            $(
+                #[test]
+                fn $test_name() {
+                    assert_eq!($a, $b);
+                }
+            )+
+          }
+        }
+    }
+    pub(crate) use simple_eqs;
+}

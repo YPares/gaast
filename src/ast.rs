@@ -193,7 +193,7 @@ impl<T> GAExpr<T> {
     /// Recursively propagate wanted grades downwards so as to evaluate for each
     /// sub-expression only the grades that are necessary to compute the whole
     /// [`GAExpr`]
-    pub fn resolve_minimum_grades(self) -> Self {
+    pub fn minimize_grades(self) -> Self {
         // The process is split in two because sub-expressions may be used at
         // several places in the AST. First we collect all the requirements for
         // expressions throughout the whole tree, as hints to be applied later:
