@@ -19,16 +19,16 @@ Computing GA expressions with `gaast` is done fully at runtime, in 3 phases:
   grades contained in input data are queried (_without_ actually reading
   that data), and then we go up the AST, inferring the grades of the result
   of each AST node (ie. each intermediate operation), and therefore of the
-  full expression.
+  full expression. We also issue errors and warnings during that phase: for
+  instance if a grade projection operator is guaranteed to always return 0
+  (because it projects to a grade that doesn't exist in the expression it is
+  applied to).
 - 2: **Grade minimisation**. This step does _downwards grade inference_.
   It's the same process, but in reverse: knowing the grade(s) that our
   entire expression evaluates to (notably if this expression uses some grade
   projections), we propagate these wanted grades downwards so as to update
   each AST node with only the grades that will need to be read or computed
-  in the end. We can also issue errors and warnings during that phase: for
-  instance if a grade projection operator is guaranteed to always return 0
-  (because it projects to a grade that doesn't exist in the expression it is
-  applied to), though `gaast` does not do this yet.
+  in the end.
 - 3: **Evaluation**. Given the annotated AST resulting from the two previous
   phases, allocates, reads and computes only what is needed to get the final
   multivector to which the full GAExpr evaluates to.
@@ -60,7 +60,7 @@ pub mod ast;
 pub mod grade_set;
 pub mod graded;
 
-pub use ast::{mv, GAExpr};
+pub use ast::{mv, GaExpr};
 pub use grade_set::{Grade, GradeSet};
 pub use graded::Graded;
 

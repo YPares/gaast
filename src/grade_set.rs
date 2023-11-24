@@ -19,7 +19,7 @@ use bitvec::prelude::*;
 /// number of different grades (N+1) of the GA it creates. The penalty it incurs
 /// for vector spaces of lower dimensions (which will generate a GA with fewer than 64 grades)
 /// is not evaluated yet
-#[derive(Debug, Eq, Clone)]
+#[derive(Debug, Eq, Clone, Hash)]
 pub struct GradeSet(BitVec);
 
 impl PartialEq for GradeSet {
@@ -91,6 +91,11 @@ impl GradeSet {
         }
     }
 
+    /// Whether this GradeSet fully contains another
+    pub fn includes(self, other: GradeSet) -> bool {
+        (self.0.clone() | other.0) == self.0
+    }
+
     /// Whether the GradeSet contains only the grade k
     pub fn is_just(&self, k: Grade) -> bool {
         self.contains(k) && self.is_single()
@@ -134,6 +139,22 @@ impl GradeSet {
             "log can only be used on multivectors of the form <A>_0 + <A>_k"
         );
         other_grade
+    }
+
+    /// Keeps only the lowest grade contained in the set
+    pub fn min(&self) -> GradeSet {
+        match self.0.first_one() {
+            None => GradeSet::empty(),
+            Some(k) => GradeSet::single(k),
+        }
+    }
+
+    /// Keeps only the highest grade contained in the set
+    pub fn max(&self) -> GradeSet {
+        match self.0.last_one() {
+            None => GradeSet::empty(),
+            Some(k) => GradeSet::single(k),
+        }
     }
 
     /// Using `self` as a geometric product result, yields all the pairs of

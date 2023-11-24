@@ -1,5 +1,7 @@
 //! Represent a GA expression using an abstract syntax tree
 
+use crate::graded::GradedOutput;
+
 use super::{grade_set::*, graded::Graded};
 use std::{borrow::Borrow as _, cell::RefCell, rc::Rc};
 use AstNode as N;
@@ -7,7 +9,7 @@ use AstNode as N;
 /// The abstract syntax tree nodes representing geometric algebra primitive
 /// operations. `T` is some raw multivector type, and `E` is a boxed type itself
 /// containing an `AstNode`.
-#[derive(Hash, Clone, Debug)]
+#[derive(Hash, Debug)]
 pub enum AstNode<E, T> {
     /// Use of a raw multivector which exposes which grades it contains. To do
     /// so, most operations on `Ast` require `T: [Graded]`
@@ -24,7 +26,7 @@ pub enum AstNode<E, T> {
     Logarithm(E),
     /// Grade projection (or "grade extraction"). The grade to extract is stored
     /// here only for error-reporting reasons
-    GradeProjection(E, Grade),
+    GradeProjection(E, GradeSet),
     /// Reverse (or "dagger")
     Reverse(E),
     /// Grade involution (or main involution)
@@ -78,67 +80,101 @@ impl<E, T> GradedNode<E, T> {
 /// be further restrained depending on the use sites of this GAExpr, and then
 /// used to optimize allocations while evaluating the expression
 #[derive(Debug)]
-pub struct GAExpr<T>(Rc<GradedNode<Self, T>>);
+pub struct GaExpr<T>(Rc<GradedNode<Self, T>>);
 
 /// Create a GA expression that just returns some pre-evaluated [`Graded`]
 /// value (multivector)
-pub fn mv<T: Graded>(x: T) -> GAExpr<T> {
+pub fn mv<T: Graded>(x: T) -> GaExpr<T> {
     let gs = x.grade_set().borrow().clone();
-    GAExpr::wrap(gs, AstNode::RawMultivector(x))
+    GaExpr::wrap(gs, AstNode::RawMultivector(x))
 }
 
 /// [`GAExpr`] uses [`Rc`] internally, so you can safely clone it extensively
-impl<T> Clone for GAExpr<T> {
+impl<T> Clone for GaExpr<T> {
     fn clone(&self) -> Self {
-        GAExpr(Rc::clone(&self.0))
+        GaExpr(Rc::clone(&self.0))
     }
 }
 
-impl<T> std::ops::Deref for GAExpr<T> {
+impl<T> std::ops::Deref for GaExpr<T> {
     type Target = GradedNode<Self, T>;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl<T> std::ops::Add for GAExpr<T> {
+impl<T, E: Into<GaExpr<T>>> std::ops::Add<E> for GaExpr<T> {
     type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        let gs = self.grade_set().clone() + rhs.grade_set().clone();
-        Self::wrap(gs, N::Addition(self, rhs))
+    fn add(self, rhs: E) -> Self::Output {
+        let e_rhs = rhs.into();
+        let gs = self.grade_set().clone() + e_rhs.grade_set().clone();
+        Self::wrap(gs, N::Addition(self, e_rhs))
     }
 }
 
-impl<T> std::ops::Mul for GAExpr<T> {
+impl<T, E: Into<GaExpr<T>>> std::ops::Sub<E> for GaExpr<T> {
     type Output = Self;
-    fn mul(self, rhs: Self) -> Self::Output {
-        let gs = self.grade_set().clone() * rhs.grade_set().clone();
-        Self::wrap(gs, N::GeometricProduct(self, rhs))
+    fn sub(self, rhs: E) -> Self::Output {
+        self + -rhs.into()
     }
 }
 
-impl<T> std::ops::Neg for GAExpr<T> {
+impl<T, E: Into<GaExpr<T>>> std::ops::Mul<E> for GaExpr<T> {
+    type Output = Self;
+    fn mul(self, rhs: E) -> Self::Output {
+        let e_rhs = rhs.into();
+        let gs = self.grade_set().clone() * e_rhs.grade_set().clone();
+        Self::wrap(gs, N::GeometricProduct(self, e_rhs))
+    }
+}
+
+impl<T: GradedOutput> From<f64> for GaExpr<T> {
+    fn from(x: f64) -> GaExpr<T> {
+        let mut scal_mv = T::init_null_mv(0, &GradeSet::single(0));
+        scal_mv.grade_slice_mut(0)[0] = x;
+        mv(scal_mv)
+    }
+}
+impl<T: GradedOutput> From<i64> for GaExpr<T> {
+    #[inline]
+    fn from(x: i64) -> GaExpr<T> {
+        (x as f64).into()
+    }
+}
+
+macro_rules! scalar_plus_and_mul_gaexpr_impls {
+    ($($t:ty),*) => {
+        $(
+        impl<T: GradedOutput> std::ops::Add<GaExpr<T>> for $t {
+            type Output = GaExpr<T>;
+            #[inline]
+            fn add(self, rhs: GaExpr<T>) -> Self::Output {
+                Into::<GaExpr<T>>::into(self) + rhs
+            }
+        }
+        impl<T: GradedOutput> std::ops::Mul<GaExpr<T>> for $t {
+            type Output = GaExpr<T>;
+            #[inline]
+            fn mul(self, rhs: GaExpr<T>) -> Self::Output {
+                Into::<GaExpr<T>>::into(self) * rhs
+            }
+        }
+        impl<T: GradedOutput> std::ops::Div<$t> for GaExpr<T> {
+            type Output = Self;
+            fn div(self, rhs: $t) -> Self {
+                self * (1.0/(rhs as f64))
+            }
+        }
+        )*
+    };
+}
+scalar_plus_and_mul_gaexpr_impls!(f64, i64);
+
+impl<T> std::ops::Neg for GaExpr<T> {
     type Output = Self;
     fn neg(self) -> Self {
         let gs = self.grade_set().clone();
         Self::wrap(gs, N::Negation(self))
-    }
-}
-
-impl<T> std::ops::Sub for GAExpr<T> {
-    type Output = Self;
-    fn sub(self, rhs: Self) -> Self::Output {
-        self + -rhs
-    }
-}
-
-impl<T> GAExpr<T> {
-    /// Raise to some power. Shortcut for `exp(log(self) * p)`, usually with `p`
-    /// evaluating to a scalar. Therefore, please refer to [`Self::log`] and
-    /// [`Self::exp`] for limitations
-    pub fn pow(self, p: GAExpr<T>) -> Self {
-        GAExpr::exp(GAExpr::log(self) * p)
     }
 }
 
@@ -157,7 +193,29 @@ macro_rules! unary_ops {
     }
 }
 
-impl<T> GAExpr<T> {
+/// `a ^ b` : the outer product. Selects the highest grade of the geometric
+/// product of `a and b`
+///
+/// Just a shortcut for (a * b).gproj(GradeSet::max)
+impl<T> std::ops::BitXor for GaExpr<T> {
+    type Output = Self;
+    fn bitxor(self, rhs: Self) -> Self::Output {
+        (self * rhs).gproj(GradeSet::max)
+    }
+}
+
+/// `a & b` : the inner product. Selects the lowest grade of the geometric
+/// product of `a and b`
+///
+/// Just a shortcut for (a * b).gproj(GradeSet::min)
+impl<T> std::ops::BitAnd for GaExpr<T> {
+    type Output = Self;
+    fn bitand(self, rhs: Self) -> Self::Output {
+        (self * rhs).gproj(GradeSet::min)
+    }
+}
+
+impl<T> GaExpr<T> {
     fn wrap(gs: GradeSet, ast: AstNode<Self, T>) -> Self {
         Self(Rc::new(GradedNode {
             grade_set_cell: RefCell::new(gs),
@@ -173,10 +231,31 @@ impl<T> GAExpr<T> {
         log Logarithm log "Natural logarithm. IMPORTANT: Is defined only for multivectors of the form \\<A\\>_0 + \\<A\\>_k"
     );
 
-    /// Grade projection: a.prj(k) = \<a\>_k
+    /// Raise to some power. Shortcut for `exp(log(self) * p)`, usually with `p`
+    /// evaluating to a scalar. Therefore, please refer to [`Self::log`] and
+    /// [`Self::exp`] for limitations
+    pub fn pow(self, p: GaExpr<T>) -> Self {
+        GaExpr::exp(GaExpr::log(self) * p)
+    }
+
+    /// Grade projection: a.g(k) = \<a\>_k.
+    ///
+    /// `a.g(k)` is a shortcut for `a.gproj(|_| k)`
+    ///
+    /// Fails immediately if the selected grade is not part of `self`
     pub fn g(self, k: Grade) -> Self {
-        let gs = self.grade_set().clone() & GradeSet::single(k);
-        Self::wrap(gs, N::GradeProjection(self, k))
+        self.gproj(|_| GradeSet::single(k))
+    }
+
+    /// Grade projection: select specific grades. Will fail immediately if some
+    /// grade returned by `f` isn't contained in `self`
+    pub fn gproj(self, f: impl FnOnce(&GradeSet) -> GradeSet) -> Self {
+        let wanted = f(&self.grade_set());
+        assert!(
+            self.grade_set().clone().includes(wanted.clone()),
+            "Projecting to non-existent grade(s)"
+        );
+        Self::wrap(wanted.clone(), N::GradeProjection(self, wanted))
     }
 
     /// Scalar product. Just a shortcut for `(self.rev() * rhs).prj(0)`
@@ -187,6 +266,22 @@ impl<T> GAExpr<T> {
     /// Clifford conjugate. Just a shortcut for `self.rev().ginvol()`
     pub fn conj(self) -> Self {
         self.rev().ginvol()
+    }
+
+    /// Inverse. Just a shortcut for `self.clone().rev() * self.norm_sq().inv()`
+    pub fn inv(self) -> Self {
+        if self.grade_set().is_just(0) {
+            // Regular scalar inversion
+            let gs = self.grade_set().clone();
+            Self::wrap(gs, N::ScalarInversion(self))
+        } else {
+            self.clone().rev() * self.norm_sq().inv()
+        }
+    }
+
+    /// Norm squared. Just a shortcut for `(self.clone().rev() * self).g(0)`
+    pub fn norm_sq(self) -> Self {
+        self.clone().scal(self)
     }
 
     /// Recursively propagate wanted grades downwards so as to evaluate for each
@@ -252,21 +347,5 @@ impl<T> GAExpr<T> {
                 e2.apply_grade_hints();
             }
         }
-    }
-
-    /// Inverse. Just a shortcut for `self.clone().rev() * self.norm_sq().inv()`
-    pub fn inv(self) -> Self {
-        if self.grade_set().is_just(0) {
-            // Regular scalar inversion
-            let gs = self.grade_set().clone();
-            Self::wrap(gs, N::ScalarInversion(self))
-        } else {
-            self.clone().rev() * self.norm_sq().inv()
-        }
-    }
-
-    /// Norm squared. Just a shortcut for `(self.clone().rev() * self).prj(0)`
-    pub fn norm_sq(self) -> Self {
-        self.clone().scal(self)
     }
 }
