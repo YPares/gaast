@@ -4,7 +4,11 @@
 //! A [`MetricAlgebra`] additionally tells how these base vectors multiply under
 //! the dot product
 
-use crate::{grade_set::Grade, graded::GradedOutput, GAExpr, GradeSet};
+use super::{
+    ast::{mv, GAExpr},
+    grade_set::{Grade, GradeSet},
+    graded::GradedOutput,
+};
 use bitvec::prelude::*;
 use num_bigint::BigUint;
 
@@ -137,7 +141,7 @@ impl<A: MetricAlgebra> ReadyAlgebra<A> {
     /// The geometric product of two basis blades restricted to cases where all
     /// basis vectors are orthogonal (diagonal metric). TODO: Diagonalize the
     /// Gram matrix when metric isn't diagonal.
-    pub fn ortho_basis_blades_mul(
+    pub fn ortho_basis_blades_gp(
         &self,
         BasisBlade(b1): &BasisBlade,
         BasisBlade(b2): &BasisBlade,
@@ -179,7 +183,7 @@ impl<const D: usize> ReadyAlgebra<[f64; D]> {
         array_init::array_init(|i| {
             let mut v = T::init_null_mv(D, &GradeSet::single(1));
             v.grade_slice_mut(1)[i] = 1.0;
-            GAExpr::val(v)
+            mv(v)
         })
     }
 }

@@ -144,7 +144,7 @@ impl GradeSet {
     /// grade_in_left, grade_in_right)
     ///
     /// GREEDY O(N^2) IMPLEMENTATION FOR NOW
-    pub fn iter_contributions_to_mul<'a>(
+    pub fn iter_contributions_to_gp<'a>(
         &'a self,
         left: &'a Self,
         right: &'a Self,
@@ -155,12 +155,12 @@ impl GradeSet {
             .filter(|(GradeSet(bits), _, _)| bits.any())
     }
 
-    /// Uses [`Self::iter_contributions_to_mul`] to collect
+    /// Uses [`Self::iter_contributions_to_gp`] to collect
     /// (contributing_grades_in_left, contributing_grades_in_right)
-    pub fn parts_contributing_to_mul(&self, left: &Self, right: &Self) -> (Self, Self) {
+    pub fn parts_contributing_to_gp(&self, left: &Self, right: &Self) -> (Self, Self) {
         let mut filtered_left = GradeSet::empty();
         let mut filtered_right = GradeSet::empty();
-        for (_, k_left, k_right) in self.iter_contributions_to_mul(left, right) {
+        for (_, k_left, k_right) in self.iter_contributions_to_gp(left, right) {
             filtered_left = filtered_left.add_grade(k_left);
             filtered_right = filtered_right.add_grade(k_right);
         }
@@ -257,7 +257,7 @@ mod tests {
         empty_intersection_is_empty: (S(0) & S(1)).is_empty() => true,
         iter_grades: (S(1) + S(22) + S(10)).iter().collect::<Vec<_>>() => vec![1,10,22],
         parts_contributing_to_mul:
-          S(0).parts_contributing_to_mul( &(S(1) + S(0) + S(2) + S(10))
+          S(0).parts_contributing_to_gp( &(S(1) + S(0) + S(2) + S(10))
                                         , &(S(0) + S(2) + S(6)) )
           => (S(0) + S(2), S(0) + S(2))
     }

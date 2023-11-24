@@ -26,23 +26,23 @@ impl<T: GradedInput> GAExpr<T> {
             return;
         }
         match self.ast_node() {
-            N::Val(input) => {
+            N::RawMultivector(input) => {
                 res.add_grades_from(input, &self.grade_set());
             }
-            N::Add(e_left, e_right) => {
+            N::Addition(e_left, e_right) => {
                 e_left.add_to_res(alg, res);
                 e_right.add_to_res(alg, res);
             }
-            N::Neg(e) => {
+            N::Negation(e) => {
                 e.add_to_res(alg, res);
                 for k in self.grade_set().iter() {
                     res.negate_grade(k);
                 }
             }
-            N::Mul(e_left, e_right) => {
-                self.perform_mul(e_left, e_right, alg, res);
+            N::GeometricProduct(e_left, e_right) => {
+                self.perform_gp(e_left, e_right, alg, res);
             }
-            N::Rev(e) => {
+            N::Reverse(e) => {
                 e.add_to_res(alg, res);
                 for k in self.grade_set().iter() {
                     if (k * (k - 1) / 2) % 2 == 1 {
@@ -50,7 +50,7 @@ impl<T: GradedInput> GAExpr<T> {
                     }
                 }
             }
-            N::GInvol(e) => {
+            N::GradeInvolution(e) => {
                 e.add_to_res(alg, res);
                 for k in self.grade_set().iter() {
                     if k % 2 == 1 {
@@ -58,12 +58,12 @@ impl<T: GradedInput> GAExpr<T> {
                     }
                 }
             }
-            N::ScalarInv(e) => {
+            N::ScalarInversion(e) => {
                 e.add_to_res(alg, res);
                 let s = res.grade_slice_mut(0);
                 s[0] = 1.0 / s[0];
             }
-            N::Prj(e, _) => {
+            N::GradeProjection(e, _) => {
                 if *self.grade_set() == *e.grade_set() {
                     // Projection is a no-op: `res` is already what the
                     // underlying expr `e` expects
@@ -75,12 +75,12 @@ impl<T: GradedInput> GAExpr<T> {
                     res.add_grades_from(&e.eval::<R>(alg), &self.grade_set());
                 }
             }
-            N::Exp(_e) => todo!(),
-            N::Log(_e) => todo!(),
+            N::Exponential(_e) => todo!(),
+            N::Logarithm(_e) => todo!(),
         }
     }
 
-    fn perform_mul<R>(
+    fn perform_gp<R>(
         &self,
         e_left: &GAExpr<T>,
         e_right: &GAExpr<T>,
@@ -93,13 +93,13 @@ impl<T: GradedInput> GAExpr<T> {
         let mv_right: R = e_right.eval(alg);
         for (_, k_left, k_right) in self
             .grade_set()
-            .iter_contributions_to_mul(&e_left.grade_set(), &e_right.grade_set())
+            .iter_contributions_to_gp(&e_left.grade_set(), &e_right.grade_set())
         {
             for (i_left, c_left) in mv_left.grade_slice(k_left).iter().enumerate() {
                 for (i_right, c_right) in mv_right.grade_slice(k_right).iter().enumerate() {
                     let bb_left = alg.basis_blade_from_coord(k_left, i_left);
                     let bb_right = alg.basis_blade_from_coord(k_right, i_right);
-                    let (bb_res, coef) = alg.ortho_basis_blades_mul(bb_left, bb_right);
+                    let (bb_res, coef) = alg.ortho_basis_blades_gp(bb_left, bb_right);
                     let (k_res, i_res) = alg.coord_from_basis_blade(&bb_res);
                     if self.grade_set().contains(k_res) {
                         mv_res.grade_slice_mut(k_res)[i_res] += c_left * c_right * coef;
@@ -118,16 +118,13 @@ mod tests {
     /// Tests that a GAExpr returns the correct result with AND without the use
     /// of the grade minimisation phase
     macro_rules! expr_eq {
-        ($geom:ident, $a:expr, $b:expr) => {{
+        ($alg:ident, $a:expr, $b:expr) => {{
             let a = $a;
             let b = $b;
-            assert_eq!(a.eval::<GradeMapMV>(&$geom), b);
-            assert_eq!(a.minimize_grades().eval::<GradeMapMV>(&$geom), b);
+            assert_eq!(a.eval::<GradeMapMV>(&$alg), b);
+            assert_eq!(a.minimize_grades().eval::<GradeMapMV>(&$alg), b);
         }};
     }
-
-    //type Ex = GAExpr<GradeMapMV>;
-    //const V: fn(GradeMapMV) -> Ex = GAExpr::val;
 
     type Ega3 = ReadyAlgebra<[f64; 3]>;
     #[fixture]

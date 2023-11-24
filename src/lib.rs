@@ -60,7 +60,7 @@ pub mod ast;
 pub mod grade_set;
 pub mod graded;
 
-pub use ast::GAExpr;
+pub use ast::{mv, GAExpr};
 pub use grade_set::{Grade, GradeSet};
 pub use graded::Graded;
 
