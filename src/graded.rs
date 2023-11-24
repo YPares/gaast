@@ -3,7 +3,7 @@
 //! components (slices)
 
 use super::{algebra::n_choose_k, grade_set::*};
-use std::{collections::HashMap, rc::Rc, sync::Arc};
+use std::{borrow::Borrow, collections::HashMap, rc::Rc, sync::Arc};
 
 /// The trait for all objects from which we can query grades
 pub trait Graded {
@@ -50,6 +50,19 @@ pub trait GradedOutput: Graded {
     fn negate_grade(&mut self, k: Grade) {
         for x in self.grade_slice_mut(k) {
             *x = -*x;
+        }
+    }
+    /// Add to `self` part of another multivector
+    fn add_grades_from<T: GradedInput>(&mut self, input: &T, grades_to_add: &GradeSet) {
+        let igs = input.grade_set();
+        for k in grades_to_add.iter() {
+            if igs.borrow().contains(k) {
+                let input_slice = input.grade_slice(k);
+                let res_slice = self.grade_slice_mut(k);
+                for (r, i) in res_slice.iter_mut().zip(input_slice) {
+                    *r = *r + i;
+                }
+            }
         }
     }
 }
