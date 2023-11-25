@@ -4,9 +4,9 @@
 Contruct geometric algebra expressions and perform grade inference on them,
 in order to limit computations and RAM usage to only what is needed to get
 the wanted result. The main type to build and combine these expressions is
-[`GAExpr`], which exposes methods for the geometric algebra primitives.
+[`GaExpr`], which exposes methods for the geometric algebra primitives.
 
-[`GAExpr`] is agnostic over which types are actually used to store input and
+[`GaExpr`] is agnostic over which types are actually used to store input and
 result multivectors. This is achived via the [`Graded`] trait and its
 subtraits. It is also agnostic over which actual vector space is used (both
 in terms of dimension and metric), via the [`algebra::MetricAlgebra`] trait.
@@ -19,10 +19,7 @@ Computing GA expressions with `gaast` is done fully at runtime, in 3 phases:
   grades contained in input data are queried (_without_ actually reading
   that data), and then we go up the AST, inferring the grades of the result
   of each AST node (ie. each intermediate operation), and therefore of the
-  full expression. We also issue errors and warnings during that phase: for
-  instance if a grade projection operator is guaranteed to always return 0
-  (because it projects to a grade that doesn't exist in the expression it is
-  applied to).
+  full expression.
 - 2: **Grade minimisation**. This step does _downwards grade inference_.
   It's the same process, but in reverse: knowing the grade(s) that our
   entire expression evaluates to (notably if this expression uses some grade
@@ -31,7 +28,7 @@ Computing GA expressions with `gaast` is done fully at runtime, in 3 phases:
   in the end.
 - 3: **Evaluation**. Given the annotated AST resulting from the two previous
   phases, allocates, reads and computes only what is needed to get the final
-  multivector to which the full GAExpr evaluates to.
+  multivector to which the full GaExpr evaluates to.
 
 The main point of this approach is that phases 1 & 2 can be cached. They
 don't need to access the actual data: they just need to know the grades and

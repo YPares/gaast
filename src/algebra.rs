@@ -263,6 +263,7 @@ mod tests {
 
     simple_eqs! {
         n_choose_zero: n_choose_k(5, 0) => 1,
+        zero_choose_zero: n_choose_k(0, 0) => 1,
         three_choose_two: n_choose_k(3, 2) => 3
     }
 }

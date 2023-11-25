@@ -4,8 +4,8 @@ use super::{algebra::*, ast::*, graded::*};
 use AstNode as N;
 
 impl<T: GradedInput> GaExpr<T> {
-    /// Evaluates a [`GAExpr`]. The given [`MetricAlgebra`] must make sense with
-    /// respect to the input values contained in the [`GAExpr`], in terms of
+    /// Evaluates a [`GaExpr`]. The given [`MetricAlgebra`] must make sense with
+    /// respect to the input values contained in the [`GaExpr`], in terms of
     /// possible grades contained in those input values, and of number of
     /// components for each grade
     pub fn eval<R>(&self, alg: &ReadyAlgebra<impl MetricAlgebra>) -> R
@@ -115,7 +115,7 @@ mod tests {
     use crate::{algebra::*, grade_map_mv, graded::GradeMapMV};
     use rstest::*;
 
-    /// Tests that a GAExpr returns the correct result with AND without the use
+    /// Tests that a GaExpr returns the correct result with AND without the use
     /// of the grade minimisation phase
     macro_rules! expr_eq {
         ($alg:ident, $a:expr, $b:expr) => {{
@@ -141,14 +141,8 @@ mod tests {
     #[rstest]
     fn vecs_to_bivec(ega3: Ega3) {
         let [e1, e2, _] = ega3.base_vec_exprs::<GradeMapMV>();
-        expr_eq!(ega3, e2 ^ e1, grade_map_mv!(2 => -1 0 0));
-    }
-
-    #[rstest]
-    #[should_panic(expected = "Projecting to non-existent grade(s)")]
-    fn projecting_to_non_existent_grade(ega3: Ega3) {
-        let [e1, e2, _] = ega3.base_vec_exprs::<GradeMapMV>();
-        (e1 ^ e2).g(0);
+        let ex = e2 ^ e1;
+        expr_eq!(ega3, ex, grade_map_mv!(2 => -1 0 0));
     }
 
     #[rstest]
@@ -164,15 +158,11 @@ mod tests {
     }
 
     #[rstest]
-    fn project(ega3: Ega3) {
+    fn projection(ega3: Ega3) {
         let [e1, e2, e3] = ega3.base_vec_exprs::<GradeMapMV>();
         let v = e1.clone() + e2.clone();
         let bv = 4 * e1 ^ e3;
         // project v onto bv:
-        expr_eq!(
-            ega3,
-            (v & bv.clone()) & bv.inv(),
-            grade_map_mv!(1 => 1 0 0)
-        );
+        expr_eq!(ega3, (v & bv.clone()) & bv.inv(), grade_map_mv!(1 => 1 0 0));
     }
 }

@@ -20,9 +20,9 @@ pub enum AstNode<E, T> {
     GeometricProduct(E, E),
     /// Multivector negation
     Negation(E),
-    /// Multivector exponentiation. See [`GAExpr::exp`] for limitations
+    /// Multivector exponentiation. See [`GaExpr::exp`] for limitations
     Exponential(E),
-    /// Multivector natural logarithm. See [`GAExpr::log`] for limitations
+    /// Multivector natural logarithm. See [`GaExpr::log`] for limitations
     Logarithm(E),
     /// Grade projection (or "grade extraction"). The grade to extract is stored
     /// here only for error-reporting reasons
@@ -66,7 +66,7 @@ impl<E, T> GradedNode<E, T> {
         match self.grade_set_hints.borrow().as_ref() {
             Some(hints) => {
                 self.grade_set_cell
-                    .replace_with(|g| g.clone() & hints.clone());
+                    .replace_with(|g| g.clone().intersection(hints.clone()));
             }
             None => {}
         };
@@ -77,7 +77,7 @@ impl<E, T> GradedNode<E, T> {
 /// An AST representing primitive GA operations, which allows to infer the
 /// grades contained in the multivector returned by the expression without
 /// having to evaluate it. This is represented by a [`GradeSet`] which can then
-/// be further restrained depending on the use sites of this GAExpr, and then
+/// be further restrained depending on the use sites of this GaExpr, and then
 /// used to optimize allocations while evaluating the expression
 #[derive(Debug)]
 pub struct GaExpr<T>(Rc<GradedNode<Self, T>>);
@@ -89,7 +89,7 @@ pub fn mv<T: Graded>(x: T) -> GaExpr<T> {
     GaExpr::wrap(gs, AstNode::RawMultivector(x))
 }
 
-/// [`GAExpr`] uses [`Rc`] internally, so you can safely clone it extensively
+/// [`GaExpr`] uses [`Rc`] internally, so you can safely clone it extensively
 impl<T> Clone for GaExpr<T> {
     fn clone(&self) -> Self {
         GaExpr(Rc::clone(&self.0))
@@ -103,12 +103,36 @@ impl<T> std::ops::Deref for GaExpr<T> {
     }
 }
 
-impl<T, E: Into<GaExpr<T>>> std::ops::Add<E> for GaExpr<T> {
+macro_rules! gaexpr_binary_ops {
+    ($($trait:ident $method:ident $ctor:ident $doc:literal),*) => {
+        $(
+        #[doc=$doc]
+        impl<T, E: Into<GaExpr<T>>> std::ops::$trait<E> for GaExpr<T> {
+            type Output = Self;
+            #[doc=$doc]
+            fn $method(self, rhs: E) -> Self::Output {
+                let e_rhs = rhs.into();
+                let gs = self.grade_set().clone().$method(e_rhs.grade_set().clone());
+                Self::wrap(gs, N::$ctor(self, e_rhs))
+            }
+        }
+        )*
+    };
+}
+gaexpr_binary_ops! {
+    Add add Addition "Multivector addition",
+    Mul mul GeometricProduct "Geometric product",
+    BitXor bitxor GeometricProduct "Outer product",
+    BitAnd bitand GeometricProduct "Inner product",
+    Shl shl GeometricProduct "Left contraction",
+    Shr shr GeometricProduct "Right contraction"
+}
+
+impl<T> std::ops::Neg for GaExpr<T> {
     type Output = Self;
-    fn add(self, rhs: E) -> Self::Output {
-        let e_rhs = rhs.into();
-        let gs = self.grade_set().clone() + e_rhs.grade_set().clone();
-        Self::wrap(gs, N::Addition(self, e_rhs))
+    fn neg(self) -> Self {
+        let gs = self.grade_set().clone();
+        Self::wrap(gs, N::Negation(self))
     }
 }
 
@@ -119,17 +143,11 @@ impl<T, E: Into<GaExpr<T>>> std::ops::Sub<E> for GaExpr<T> {
     }
 }
 
-impl<T, E: Into<GaExpr<T>>> std::ops::Mul<E> for GaExpr<T> {
-    type Output = Self;
-    fn mul(self, rhs: E) -> Self::Output {
-        let e_rhs = rhs.into();
-        let gs = self.grade_set().clone() * e_rhs.grade_set().clone();
-        Self::wrap(gs, N::GeometricProduct(self, e_rhs))
-    }
-}
-
 impl<T: GradedOutput> From<f64> for GaExpr<T> {
     fn from(x: f64) -> GaExpr<T> {
+        if x == 0.0 {
+            return mv(T::init_null_mv(0, &GradeSet::empty()));
+        }
         let mut scal_mv = T::init_null_mv(0, &GradeSet::single(0));
         scal_mv.grade_slice_mut(0)[0] = x;
         mv(scal_mv)
@@ -142,7 +160,7 @@ impl<T: GradedOutput> From<i64> for GaExpr<T> {
     }
 }
 
-macro_rules! scalar_plus_and_mul_gaexpr_impls {
+macro_rules! scalar_with_gaexpr_binary_ops {
     ($($t:ty),*) => {
         $(
         impl<T: GradedOutput> std::ops::Add<GaExpr<T>> for $t {
@@ -168,17 +186,9 @@ macro_rules! scalar_plus_and_mul_gaexpr_impls {
         )*
     };
 }
-scalar_plus_and_mul_gaexpr_impls!(f64, i64);
+scalar_with_gaexpr_binary_ops!(f64, i64);
 
-impl<T> std::ops::Neg for GaExpr<T> {
-    type Output = Self;
-    fn neg(self) -> Self {
-        let gs = self.grade_set().clone();
-        Self::wrap(gs, N::Negation(self))
-    }
-}
-
-macro_rules! unary_ops {
+macro_rules! gaexpr_unary_ops {
     ($($fn_name:ident $ctor:ident $grade_op:ident $doc:literal),*) => {
         $(
             #[doc=$doc]
@@ -193,28 +203,6 @@ macro_rules! unary_ops {
     }
 }
 
-/// `a ^ b` : the outer product. Selects the highest grade of the geometric
-/// product of `a and b`
-///
-/// Just a shortcut for (a * b).gproj(GradeSet::max)
-impl<T> std::ops::BitXor for GaExpr<T> {
-    type Output = Self;
-    fn bitxor(self, rhs: Self) -> Self::Output {
-        (self * rhs).gproj(GradeSet::max)
-    }
-}
-
-/// `a & b` : the inner product. Selects the lowest grade of the geometric
-/// product of `a and b`
-///
-/// Just a shortcut for (a * b).gproj(GradeSet::min)
-impl<T> std::ops::BitAnd for GaExpr<T> {
-    type Output = Self;
-    fn bitand(self, rhs: Self) -> Self::Output {
-        (self * rhs).gproj(GradeSet::min)
-    }
-}
-
 impl<T> GaExpr<T> {
     fn wrap(gs: GradeSet, ast: AstNode<Self, T>) -> Self {
         Self(Rc::new(GradedNode {
@@ -224,12 +212,12 @@ impl<T> GaExpr<T> {
         }))
     }
 
-    unary_ops!(
+    gaexpr_unary_ops! {
         rev Reverse id "Reverse (dagger)",
         ginvol GradeInvolution id "Grade involution (main involution)",
         exp Exponential exp "Exponential. IMPORTANT: Is defined only for **single**-graded k-vectors",
         log Logarithm log "Natural logarithm. IMPORTANT: Is defined only for multivectors of the form \\<A\\>_0 + \\<A\\>_k"
-    );
+    }
 
     /// Raise to some power. Shortcut for `exp(log(self) * p)`, usually with `p`
     /// evaluating to a scalar. Therefore, please refer to [`Self::log`] and
@@ -238,24 +226,16 @@ impl<T> GaExpr<T> {
         GaExpr::exp(GaExpr::log(self) * p)
     }
 
-    /// Grade projection: a.g(k) = \<a\>_k.
-    ///
-    /// `a.g(k)` is a shortcut for `a.gproj(|_| k)`
-    ///
-    /// Fails immediately if the selected grade is not part of `self`
-    pub fn g(self, k: Grade) -> Self {
-        self.gproj(|_| GradeSet::single(k))
+    /// Grade projection: a.g(k) = \<a\>_k
+    pub fn g(self, k: i64) -> Self {
+        self.gselect(|_| GradeSet::single(k))
     }
 
-    /// Grade projection: select specific grades. Will fail immediately if some
-    /// grade returned by `f` isn't contained in `self`
-    pub fn gproj(self, f: impl FnOnce(&GradeSet) -> GradeSet) -> Self {
+    /// Grade projection: select specific grades.
+    pub fn gselect(self, f: impl FnOnce(&GradeSet) -> GradeSet) -> Self {
         let wanted = f(&self.grade_set());
-        assert!(
-            self.grade_set().clone().includes(wanted.clone()),
-            "Projecting to non-existent grade(s)"
-        );
-        Self::wrap(wanted.clone(), N::GradeProjection(self, wanted))
+        let gs = self.grade_set().clone().intersection(wanted);
+        Self::wrap(gs.clone(), N::GradeProjection(self, gs))
     }
 
     /// Scalar product. Just a shortcut for `(self.rev() * rhs).prj(0)`
@@ -286,7 +266,7 @@ impl<T> GaExpr<T> {
 
     /// Recursively propagate wanted grades downwards so as to evaluate for each
     /// sub-expression only the grades that are necessary to compute the whole
-    /// [`GAExpr`]
+    /// [`GaExpr`]
     pub fn minimize_grades(self) -> Self {
         // The process is split in two because sub-expressions may be used at
         // several places in the AST. First we collect all the requirements for

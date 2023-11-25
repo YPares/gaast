@@ -1,6 +1,8 @@
 //! Represent the effect of geometric algebra primitives over the grades of the
 //! multivectors
 
+use std::fmt::Debug;
+
 use bitvec::prelude::*;
 
 /// Represents the set of grades that can be contained in some multivector. You
@@ -19,8 +21,14 @@ use bitvec::prelude::*;
 /// number of different grades (N+1) of the GA it creates. The penalty it incurs
 /// for vector spaces of lower dimensions (which will generate a GA with fewer than 64 grades)
 /// is not evaluated yet
-#[derive(Debug, Eq, Clone, Hash)]
+#[derive(Eq, Clone, Hash)]
 pub struct GradeSet(BitVec);
+
+impl Debug for GradeSet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.iter().collect::<Vec<_>>().fmt(f)
+    }
+}
 
 impl PartialEq for GradeSet {
     /// Allows equality between bitvecs of different lengths: tests if they are
@@ -44,11 +52,20 @@ impl GradeSet {
         // An empty bitvec is just treated as a bitvec full of zeroes
     }
 
-    /// The grade of a k-vector
-    pub fn single(k: Grade) -> Self {
+    fn from_usize(k: usize) -> Self {
         let mut v = bitvec![0; k + 1];
         v.set(k, true);
         GradeSet(v)
+    }
+
+    // The grade of a k-vector. Can be negative, if so, the resulting GradeSet
+    // is empty
+    pub fn single(k: i64) -> Self {
+        if k < 0 {
+            Self::empty()
+        } else {
+            Self::from_usize(k as Grade)
+        }
     }
 
     /// Grades ranging from x to y (incl)
@@ -58,6 +75,15 @@ impl GradeSet {
             *i = true;
         }
         GradeSet(v)
+    }
+
+    /// GradeSet intersection: select the grades contained in both `self` and `rhs`.
+    /// You can think of it as grade projection (extraction) performed on `self`,
+    /// using `rhs` as the set of grades to keep
+    pub fn intersection(self, rhs: Self) -> Self {
+        GradeSet(self.0 & rhs.0)
+        // Note: the resulting bitvec will always have the same length as
+        // `self.0`
     }
 
     /// Iterate over each grade present in the GradeSet
@@ -128,7 +154,7 @@ impl GradeSet {
             self.is_single(),
             "exp cannot be used on a multivector, only a k-vector"
         );
-        Self::single(0) + self
+        Self::from_usize(0) + self
     }
 
     /// Logarithm. Is defined only for multivectors of the form \<A\>_0 + \<A\>_k
@@ -145,7 +171,7 @@ impl GradeSet {
     pub fn min(&self) -> GradeSet {
         match self.0.first_one() {
             None => GradeSet::empty(),
-            Some(k) => GradeSet::single(k),
+            Some(k) => GradeSet::from_usize(k),
         }
     }
 
@@ -153,8 +179,29 @@ impl GradeSet {
     pub fn max(&self) -> GradeSet {
         match self.0.last_one() {
             None => GradeSet::empty(),
-            Some(k) => GradeSet::single(k),
+            Some(k) => GradeSet::from_usize(k),
         }
+    }
+
+    /// For each grade k in self and each grade g in other, yield (k,g)
+    pub fn iter_cartesian_product<'a>(
+        &'a self,
+        other: &'a Self,
+    ) -> impl Iterator<Item = (Grade, Grade)> + Clone + 'a {
+        self.iter()
+            .flat_map(move |kl| other.iter().map(move |kr| (kl, kr)))
+    }
+
+    // Apply a function to each pair of the cartesian product of 2 grade sets
+    pub fn sum_map_cartesian_product(
+        &self,
+        other: &Self,
+        mut f: impl FnMut(i64, i64) -> GradeSet,
+    ) -> GradeSet {
+        self.iter_cartesian_product(&other)
+            .map(|(k1, k2)| f(k1 as i64, k2 as i64))
+            .reduce(|a, b| a + b)
+            .unwrap_or(GradeSet::empty())
     }
 
     /// Using `self` as a geometric product result, yields all the pairs of
@@ -170,10 +217,16 @@ impl GradeSet {
         left: &'a Self,
         right: &'a Self,
     ) -> impl Iterator<Item = (GradeSet, Grade, Grade)> + Clone + 'a {
-        let contribs = |kl, kr| self.clone() & (Self::single(kl) * Self::single(kr));
-        left.iter()
-            .flat_map(move |kl| right.iter().map(move |kr| (contribs(kl, kr), kl, kr)))
-            .filter(|(GradeSet(bits), _, _)| bits.any())
+        left.iter_cartesian_product(right).filter_map(|(kl, kr)| {
+            let contribs = self
+                .clone()
+                .intersection(Self::from_usize(kl) * Self::from_usize(kr));
+            if !contribs.is_empty() {
+                Some((contribs, kl, kr))
+            } else {
+                None
+            }
+        })
     }
 
     /// Uses [`Self::iter_contributions_to_gp`] to collect
@@ -208,15 +261,41 @@ impl std::ops::Add for GradeSet {
     }
 }
 
-/// GradeSet intersection: select the grades contained in both `self` and `rhs`.
-/// You can think of it as grade projection (extraction) performed on `self`,
-/// using `rhs` as the set of grades to keep
+/// Outer product
+impl std::ops::BitXor for GradeSet {
+    type Output = Self;
+    fn bitxor(self, rhs: Self) -> Self::Output {
+        self.sum_map_cartesian_product(&rhs, |k1, k2| GradeSet::single(k1 + k2))
+    }
+}
+
+/// Inner product
 impl std::ops::BitAnd for GradeSet {
-    type Output = GradeSet;
+    type Output = Self;
     fn bitand(self, rhs: Self) -> Self::Output {
-        GradeSet(self.0 & rhs.0)
-        // Note: the resulting bitvec will always have the same length as
-        // `self.0`
+        self.sum_map_cartesian_product(&rhs, |k1, k2| {
+            if k1 == 0 || k2 == 0 {
+                GradeSet::empty()
+            } else {
+                GradeSet::single((k1 - k2).abs())
+            }
+        })
+    }
+}
+
+/// Left contraction
+impl std::ops::Shl for GradeSet {
+    type Output = Self;
+    fn shl(self, rhs: Self) -> Self::Output {
+        self.sum_map_cartesian_product(&rhs, |k1, k2| GradeSet::single(k2 - k1))
+    }
+}
+
+/// Right contraction
+impl std::ops::Shr for GradeSet {
+    type Output = Self;
+    fn shr(self, rhs: Self) -> Self::Output {
+        self.sum_map_cartesian_product(&rhs, |k1, k2| GradeSet::single(k1 - k2))
     }
 }
 
@@ -252,7 +331,7 @@ mod tests {
     use super::*;
     use crate::test_macros::*;
 
-    const S: fn(Grade) -> GradeSet = GradeSet::single;
+    const S: fn(i64) -> GradeSet = GradeSet::single;
     const E: fn() -> GradeSet = GradeSet::empty;
 
     #[test]
@@ -261,6 +340,7 @@ mod tests {
     }
 
     simple_eqs! {
+        neg_grade_is_empty: S(-1) => E(),
         add_self_id: S(3) + S(3) => S(3),
         add_empty_id: S(3) + E() => S(3),
         mul_empty_absorb: S(3) * E() => E(),
@@ -271,15 +351,17 @@ mod tests {
         mul_trivec_pentavec: S(3) * S(5) => S(2) + S(4) + S(6) + S(8),
         mul_vec_rotor: S(1) * (S(0) + S(2)) => S(1) + S(3),
         range: GradeSet::range(4,7) => S(4) + S(5) + S(6) + S(7),
-        intersect: GradeSet::range(0,10) & GradeSet::range(4,30) => GradeSet::range(4,10),
+        intersect: GradeSet::range(0,10).intersection(GradeSet::range(4,30)) => GradeSet::range(4,10),
         single_graded: (S(1) + S(1)).is_single() => true,
         not_single_graded: (S(1) + S(2)).is_single() => false,
         empty_not_single_graded: E().is_single() => false,
-        empty_intersection_is_empty: (S(0) & S(1)).is_empty() => true,
+        empty_intersection_is_empty: S(0).intersection(S(1)).is_empty() => true,
         iter_grades: (S(1) + S(22) + S(10)).iter().collect::<Vec<_>>() => vec![1,10,22],
-        parts_contributing_to_mul:
+        parts_contributing_to_gp:
           S(0).parts_contributing_to_gp( &(S(1) + S(0) + S(2) + S(10))
                                         , &(S(0) + S(2) + S(6)) )
-          => (S(0) + S(2), S(0) + S(2))
+          => (S(0) + S(2), S(0) + S(2)),
+        outer: (S(1) + S(4)) ^ (S(1) + S(5)) => S(2) + S(6) + S(5) + S(9),
+        inner: (S(1) + S(4)) & (S(0) + S(1) + S(5)) => S(0) + S(4) + S(3) + S(1)
     }
 }
