@@ -94,7 +94,7 @@ impl<T: GradedData> ReadyGaExpr<T> {
                 }
             }
             N::GradeProjection(e, _) => {
-                if self.grade_set() == e.grade_set() {
+                if *self.grade_set() == *e.grade_set() {
                     // Projection is a no-op: `res` is already what the
                     // underlying expr `e` expects
                     e.add_to_res(alg, cache, res);

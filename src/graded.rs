@@ -3,26 +3,35 @@
 //! components (slices)
 
 use super::{algebra::n_choose_k, grade_set::*};
-use std::{borrow::Borrow, collections::HashMap, rc::Rc, sync::Arc};
+use std::{collections::HashMap, rc::Rc, sync::Arc};
+
+pub struct Owned<T>(pub T);
+
+impl<T> std::ops::Deref for Owned<T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 /// The trait for all objects from which we can query grades
 pub trait Graded {
-    /// Either directly an owned GradeSet (for Graded objects which do not
-    /// directly hold on to a GradeSet and must reconstruct it on the fly) or a
-    /// ref to a GradeSet (for Graded objects which do internally already have
-    /// some GradeSet which can be reused read-only)
-    type GradeSetOrRef<'a>: std::borrow::Borrow<GradeSet> + 'a
+    /// Either some reference to a preexisting [`GradeSet`] (for Graded objects which do
+    /// internally already have some GradeSet which can be reused read-only), or
+    /// an [`Owned<GradeSet>`] (for Graded objects which do not directly hold on
+    /// to a GradeSet and must reconstruct it on the fly)
+    type RefToGradeSet<'a>: std::ops::Deref<Target = GradeSet> + 'a
     where
         Self: 'a;
     /// Get the GradeSet of the object
-    fn grade_set<'a>(&'a self) -> Self::GradeSetOrRef<'a>;
+    fn grade_set(&self) -> Self::RefToGradeSet<'_>;
 }
 
 /// The identity implementation. A [`GradeSet`] just returns a reference to
 /// itself
 impl Graded for GradeSet {
-    type GradeSetOrRef<'a> = &'a Self;
-    fn grade_set<'a>(&'a self) -> Self::GradeSetOrRef<'a> {
+    type RefToGradeSet<'a> = &'a Self;
+    fn grade_set(&self) -> Self::RefToGradeSet<'_> {
         self
     }
 }
@@ -56,7 +65,7 @@ pub trait GradedDataMut: GradedData {
     fn add_grades_from<T: GradedData>(&mut self, input: &T, grades_to_add: &GradeSet) {
         let igs = input.grade_set();
         for k in grades_to_add.iter() {
-            if igs.borrow().contains(k) {
+            if igs.contains(k) {
                 let input_slice = input.grade_slice(k);
                 let res_slice = self.grade_slice_mut(k);
                 for (r, i) in res_slice.iter_mut().zip(input_slice) {
@@ -71,11 +80,11 @@ macro_rules! Graded_blanket_impls {
     ($($ref:tt),*) => {
         $(
             impl<T: Graded> Graded for $ref<T> {
-                type GradeSetOrRef<'a> = T::GradeSetOrRef<'a> where T: 'a;
-                fn grade_set<'a>(&'a self) -> Self::GradeSetOrRef<'a> {
+                type RefToGradeSet<'a> = T::RefToGradeSet<'a> where T: 'a;
+                fn grade_set(&self) -> Self::RefToGradeSet<'_> {
                     (**self).grade_set()
                 }
-                            }
+            }
             impl<T: GradedData> GradedData for $ref<T> {
                 fn grade_slice(&self, k: Grade) -> &[f64] {
                     (**self).grade_slice(k)
@@ -99,9 +108,9 @@ impl<T: GradedDataMut> GradedDataMut for Box<T> {
 }
 
 impl Graded for f64 {
-    type GradeSetOrRef<'a> = GradeSet;
-    fn grade_set(&self) -> Self::GradeSetOrRef<'_> {
-        GradeSet::single(0)
+    type RefToGradeSet<'a> = Owned<GradeSet>;
+    fn grade_set(&self) -> Self::RefToGradeSet<'_> {
+        Owned(GradeSet::single(0))
     }
 }
 impl GradedData for f64 {
@@ -130,11 +139,13 @@ impl GradedDataMut for f64 {
 pub struct GradeMapMV(pub HashMap<Grade, Vec<f64>>);
 
 impl Graded for GradeMapMV {
-    type GradeSetOrRef<'a> = GradeSet;
-    fn grade_set(&self) -> Self::GradeSetOrRef<'_> {
-        self.0
-            .keys()
-            .fold(GradeSet::empty(), |acc, &k| acc.add_grade(k))
+    type RefToGradeSet<'a> = Owned<GradeSet>;
+    fn grade_set(&self) -> Self::RefToGradeSet<'_> {
+        Owned(
+            self.0
+                .keys()
+                .fold(GradeSet::empty(), |acc, &k| acc.add_grade(k)),
+        )
     }
 }
 impl GradedData for GradeMapMV {
@@ -155,12 +166,12 @@ impl GradedDataMut for GradeMapMV {
     }
 }
 
-#[macro_export]
 /// A macro to create a [`GradeMapMV`], for instance in Cl(3):
 ///
 /// `grade_map_mv!(0 => 1, 1 => 1 1 0, 3 => 1)`
 ///
 /// this has a scalar part, a vector part, and a trivector part
+#[macro_export]
 macro_rules! grade_map_mv {
     ($($grade:expr => $($x:expr)+),+) => {{
         let mut m = std::collections::HashMap::new();

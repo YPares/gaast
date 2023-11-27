@@ -4,7 +4,6 @@ use crate::graded::GradedDataMut;
 
 use super::{grade_set::*, graded::Graded};
 use std::{
-    borrow::Borrow as _,
     cell::{Ref, RefCell},
     rc::Rc,
 };
@@ -95,7 +94,7 @@ pub struct GaExpr<T> {
 /// Create a GA expression that just returns some pre-evaluated [`Graded`]
 /// value (multivector)
 pub fn mv<T: Graded>(x: T) -> GaExpr<T> {
-    let gs = x.grade_set().borrow().clone();
+    let gs = x.grade_set().clone();
     GaExpr::wrap(gs, AstNode::GradedObj(x))
 }
 
@@ -387,8 +386,8 @@ impl<T> ReadyGaExpr<T> {
 
 /// Get the [`GradeSet`] inferred for this expression
 impl<T> Graded for ReadyGaExpr<T> {
-    type GradeSetOrRef<'a> = GradeSet where T: 'a;
-    fn grade_set<'a>(&'a self) -> Self::GradeSetOrRef<'a> {
-        self.rc.borrow_gs().clone()
+    type RefToGradeSet<'a> = Ref<'a, GradeSet> where T: 'a;
+    fn grade_set(&self) -> Self::RefToGradeSet<'_> {
+        self.rc.borrow_gs()
     }
 }
