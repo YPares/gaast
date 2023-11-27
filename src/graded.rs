@@ -75,7 +75,7 @@ macro_rules! Graded_blanket_impls {
                 fn grade_set<'a>(&'a self) -> Self::GradeSetOrRef<'a> {
                     (**self).grade_set()
                 }
-            }
+                            }
             impl<T: GradedData> GradedData for $ref<T> {
                 fn grade_slice(&self, k: Grade) -> &[f64] {
                     (**self).grade_slice(k)

@@ -22,7 +22,9 @@ use bitvec::prelude::*;
 /// for vector spaces of lower dimensions (which will generate a GA with fewer than 64 grades)
 /// is not evaluated yet
 #[derive(Eq, Clone, Hash)]
-pub struct GradeSet(BitVec);
+pub struct GradeSet {
+    bv: BitVec,
+}
 
 impl Debug for GradeSet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -34,7 +36,7 @@ impl PartialEq for GradeSet {
     /// Allows equality between bitvecs of different lengths: tests if they are
     /// equal up to some trailing zeroes
     fn eq(&self, other: &Self) -> bool {
-        let (small, big) = sort_by_len(&self.0, &other.0);
+        let (small, big) = sort_by_len(&self.bv, &other.bv);
         big[0..small.len()] == &small[..] && big[small.len()..].not_any()
     }
 }
@@ -48,14 +50,14 @@ impl GradeSet {
     /// the grades contained in a multivector, it can _always_ be zero. And when
     /// a multivector has _no_ grades, then it can _only_ be zero.
     pub fn empty() -> Self {
-        GradeSet(BitVec::new())
+        GradeSet { bv: BitVec::new() }
         // An empty bitvec is just treated as a bitvec full of zeroes
     }
 
-    fn from_usize(k: usize) -> Self {
-        let mut v = bitvec![0; k + 1];
-        v.set(k, true);
-        GradeSet(v)
+    fn from_usize(k: Grade) -> Self {
+        let mut bv = bitvec![0; k + 1];
+        bv.set(k, true);
+        GradeSet { bv }
     }
 
     // The grade of a k-vector. Can be negative, if so, the resulting GradeSet
@@ -70,36 +72,62 @@ impl GradeSet {
 
     /// Grades ranging from x to y (incl)
     pub fn range(x: Grade, y: Grade) -> Self {
-        let mut v = bitvec![0; y + 1];
-        for mut i in &mut v.as_mut_bitslice()[x..=y] {
+        let mut bv = bitvec![0; y + 1];
+        for mut i in &mut bv.as_mut_bitslice()[x..=y] {
             *i = true;
         }
-        GradeSet(v)
+        GradeSet { bv }
     }
 
     /// GradeSet intersection: select the grades contained in both `self` and `rhs`.
     /// You can think of it as grade projection (extraction) performed on `self`,
     /// using `rhs` as the set of grades to keep
     pub fn intersection(self, rhs: Self) -> Self {
-        GradeSet(self.0 & rhs.0)
+        GradeSet {
+            bv: self.bv & rhs.bv,
+        }
         // Note: the resulting bitvec will always have the same length as
-        // `self.0`
+        // `self.bv`
     }
 
     /// Iterate over each grade present in the GradeSet
     pub fn iter(&self) -> impl Iterator<Item = Grade> + Clone + '_ {
-        self.0.iter_ones()
+        self.bv.iter_ones()
+    }
+
+    /// Whether the GradeSet contains only even-graded parts
+    pub fn all_even(&self) -> bool {
+        self.iter().all(|x| x % 2 == 0)
+    }
+
+    /// Whether the GradeSet contains only odd-graded parts
+    pub fn all_odd(&self) -> bool {
+        self.iter().all(|x| x % 2 == 1)
+    }
+
+    /// Whether the GradeSet can represent a versor, ie. an object factorizable
+    /// into a sequence of geometric products of `k` invertible vectors. An even
+    /// (resp. odd) `k` will always result in a multivector with only even
+    /// (resp. odd) grades, therefore versors can only be fully even-graded or
+    /// fully odd-graded.
+    ///
+    /// We say _can_ because the parity condition above is necessary but not
+    /// sufficient a condition so a multivector is a versor, factorizability is
+    /// necessary too. This factorizability means that a versor will always
+    /// square to a scalar.
+    pub fn can_be_versor(&self) -> bool {
+        self.all_even() || self.all_odd()
     }
 
     /// Whether the GradeSet contains no grades. If so, the expression it is
     /// attached to can only be equal to zero
     pub fn is_empty(&self) -> bool {
-        self.0.not_any()
+        self.bv.not_any()
     }
 
     /// Whether the GradeSet contains exactly one grade
     pub fn is_single(&self) -> bool {
-        let mut iter = self.0.iter_ones();
+        let mut iter = self.bv.iter_ones();
         if let None = iter.next() {
             return false;
         }
@@ -111,7 +139,7 @@ impl GradeSet {
 
     /// Whether the GradeSet contains the grade k
     pub fn contains(&self, k: Grade) -> bool {
-        match self.0.get(k) {
+        match self.bv.get(k) {
             None => false,
             Some(x) => *x,
         }
@@ -119,7 +147,7 @@ impl GradeSet {
 
     /// Whether this GradeSet fully contains another
     pub fn includes(self, other: GradeSet) -> bool {
-        (self.0.clone() | other.0) == self.0
+        (self.bv.clone() | other.bv) == self.bv
     }
 
     /// Whether the GradeSet contains only the grade k
@@ -129,22 +157,18 @@ impl GradeSet {
 
     /// Add a grade to the set
     pub fn add_grade(mut self, k: Grade) -> Self {
-        if k >= self.0.len() {
-            self.0.resize(k + 1, false);
+        if k >= self.bv.len() {
+            self.bv.resize(k + 1, false);
         }
-        self.0.set(k, true);
+        self.bv.set(k, true);
         self
     }
 
     /// Remove a grade from the set
     pub fn rm_grade(mut self, k: Grade) -> Self {
-        if k < self.0.len() {
-            self.0.set(k, false);
+        if k < self.bv.len() {
+            self.bv.set(k, false);
         }
-        self
-    }
-
-    pub(crate) fn id(self) -> Self {
         self
     }
 
@@ -168,19 +192,13 @@ impl GradeSet {
     }
 
     /// Keeps only the lowest grade contained in the set
-    pub fn min(&self) -> GradeSet {
-        match self.0.first_one() {
-            None => GradeSet::empty(),
-            Some(k) => GradeSet::from_usize(k),
-        }
+    pub fn min(&self) -> Option<Grade> {
+        self.bv.first_one()
     }
 
     /// Keeps only the highest grade contained in the set
-    pub fn max(&self) -> GradeSet {
-        match self.0.last_one() {
-            None => GradeSet::empty(),
-            Some(k) => GradeSet::from_usize(k),
-        }
+    pub fn max(&self) -> Option<Grade> {
+        self.bv.last_one()
     }
 
     /// For each grade k in self and each grade g in other, yield (k,g)
@@ -240,6 +258,11 @@ impl GradeSet {
         }
         (filtered_left, filtered_right)
     }
+
+    #[inline]
+    pub(crate) fn id(self) -> Self {
+        self
+    }
 }
 
 fn sort_by_len<T>(v1: T, v2: T) -> (T, T)
@@ -256,8 +279,8 @@ where
 impl std::ops::Add for GradeSet {
     type Output = Self;
     fn add(self, rhs: Self) -> Self::Output {
-        let (small, big) = sort_by_len(self.0, rhs.0);
-        GradeSet(big | small)
+        let (small, big) = sort_by_len(self.bv, rhs.bv);
+        GradeSet { bv: big | small }
     }
 }
 
@@ -305,9 +328,9 @@ impl std::ops::Shr for GradeSet {
 impl std::ops::Mul for GradeSet {
     type Output = Self;
     fn mul(self, rhs: Self) -> Self::Output {
-        let (small, big) = sort_by_len(self.0, rhs.0);
+        let (small, big) = sort_by_len(self.bv, rhs.bv);
         if small.len() == 0 {
-            GradeSet(small)
+            GradeSet { bv: small }
         } else {
             let mut res = bitvec![0; big.len() + small.len() - 1];
             for r in 0..res.len() {
@@ -321,7 +344,7 @@ impl std::ops::Mul for GradeSet {
                     }
                 }
             }
-            GradeSet(res)
+            GradeSet { bv: res }
         }
     }
 }
@@ -331,8 +354,9 @@ mod tests {
     use super::*;
     use crate::test_macros::*;
 
-    const S: fn(i64) -> GradeSet = GradeSet::single;
     const E: fn() -> GradeSet = GradeSet::empty;
+    const S: fn(i64) -> GradeSet = GradeSet::single;
+    const R: fn(usize, usize) -> GradeSet = GradeSet::range;
 
     #[test]
     fn neq() {
@@ -350,8 +374,8 @@ mod tests {
         mul_trivec_quadvec: S(3) * S(4) => S(1) + S(3) + S(5) + S(7),
         mul_trivec_pentavec: S(3) * S(5) => S(2) + S(4) + S(6) + S(8),
         mul_vec_rotor: S(1) * (S(0) + S(2)) => S(1) + S(3),
-        range: GradeSet::range(4,7) => S(4) + S(5) + S(6) + S(7),
-        intersect: GradeSet::range(0,10).intersection(GradeSet::range(4,30)) => GradeSet::range(4,10),
+        range: R(4,7) => S(4) + S(5) + S(6) + S(7),
+        intersect: R(0,10).intersection(R(4,30)) => R(4,10),
         single_graded: (S(1) + S(1)).is_single() => true,
         not_single_graded: (S(1) + S(2)).is_single() => false,
         empty_not_single_graded: E().is_single() => false,
