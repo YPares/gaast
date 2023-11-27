@@ -126,7 +126,7 @@ impl GradedOutput for f64 {
 /// Convenient for testing, but neither efficient nor compact in memory.
 /// Notably, just storing a scalar part (ie. just a [`f64`]) requires 2
 /// allocations (singleton hashmap and singleton vec)
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct GradeMapMV(pub HashMap<Grade, Vec<f64>>);
 
 impl Graded for GradeMapMV {

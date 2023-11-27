@@ -1,49 +1,80 @@
 //! How to evaluate a GA expression into an actual multivector
 
+use std::collections::HashMap;
+
 use super::{algebra::*, ast::*, graded::*};
 use AstNode as N;
 
-impl<T: GradedInput> GaExpr<T> {
+type Cache<R> = HashMap<ExprId, R>;
+
+impl<T: GradedInput> ReadyGaExpr<T> {
     /// Evaluates a [`GaExpr`]. The given [`MetricAlgebra`] must make sense with
     /// respect to the input values contained in the [`GaExpr`], in terms of
     /// possible grades contained in those input values, and of number of
     /// components for each grade
     pub fn eval<R>(&self, alg: &ReadyAlgebra<impl MetricAlgebra>) -> R
     where
-        R: GradedInput + GradedOutput,
+        R: GradedInput + GradedOutput + Clone,
     {
-        let mut res = R::init_null_mv(alg.vec_space_dim(), &self.grade_set());
-        self.add_to_res(alg, &mut res);
-        res
+        self.eval_with_cache(alg, &mut HashMap::new())
     }
 
-    fn add_to_res<R>(&self, alg: &ReadyAlgebra<impl MetricAlgebra>, res: &mut R)
+    fn eval_with_cache<R>(
+        &self,
+        alg: &ReadyAlgebra<impl MetricAlgebra>,
+        cache: &mut Cache<R>,
+    ) -> R
     where
-        R: GradedInput + GradedOutput,
+        R: GradedInput + GradedOutput + Clone,
+    {
+        if self.is_reused() {
+            match cache.get(&self.identify()) {
+                Some(r) => r.clone(),
+                None => {
+                    let mut res = R::init_null_mv(alg.vec_space_dim(), &self.grade_set());
+                    self.add_to_res(alg, cache, &mut res);
+                    cache.insert(self.identify(), res.clone());
+                    res
+                }
+            }
+        } else {
+            let mut res = R::init_null_mv(alg.vec_space_dim(), &self.grade_set());
+            self.add_to_res(alg, cache, &mut res);
+            res
+        }
+    }
+
+    fn add_to_res<R>(
+        &self,
+        alg: &ReadyAlgebra<impl MetricAlgebra>,
+        cache: &mut Cache<R>,
+        res: &mut R,
+    ) where
+        R: GradedInput + GradedOutput + Clone,
     {
         if self.grade_set().is_empty() {
             // self necessarily evaluates to zero, no need to go further
             return;
         }
         match self.ast_node() {
-            N::RawMultivector(input) => {
+            N::GradedObj(input) => {
                 res.add_grades_from(input, &self.grade_set());
             }
             N::Addition(e_left, e_right) => {
-                e_left.add_to_res(alg, res);
-                e_right.add_to_res(alg, res);
+                e_left.add_to_res(alg, cache, res);
+                e_right.add_to_res(alg, cache, res);
             }
             N::Negation(e) => {
-                e.add_to_res(alg, res);
+                e.add_to_res(alg, cache, res);
                 for k in self.grade_set().iter() {
                     res.negate_grade(k);
                 }
             }
             N::GeometricProduct(e_left, e_right) => {
-                self.eval_gp(e_left, e_right, alg, res);
+                self.eval_gp(e_left, e_right, alg, cache, res);
             }
             N::Reverse(e) => {
-                e.add_to_res(alg, res);
+                e.add_to_res(alg, cache, res);
                 for k in self.grade_set().iter() {
                     if (k * (k - 1) / 2) % 2 == 1 {
                         res.negate_grade(k);
@@ -51,7 +82,7 @@ impl<T: GradedInput> GaExpr<T> {
                 }
             }
             N::GradeInvolution(e) => {
-                e.add_to_res(alg, res);
+                e.add_to_res(alg, cache, res);
                 for k in self.grade_set().iter() {
                     if k % 2 == 1 {
                         res.negate_grade(k);
@@ -59,15 +90,15 @@ impl<T: GradedInput> GaExpr<T> {
                 }
             }
             N::ScalarInversion(e) => {
-                e.add_to_res(alg, res);
+                e.add_to_res(alg, cache, res);
                 let s = res.grade_slice_mut(0);
                 s[0] = 1.0 / s[0];
             }
             N::GradeProjection(e, _) => {
-                if *self.grade_set() == *e.grade_set() {
+                if self.grade_set() == e.grade_set() {
                     // Projection is a no-op: `res` is already what the
                     // underlying expr `e` expects
-                    e.add_to_res(alg, res);
+                    e.add_to_res(alg, cache, res);
                 } else {
                     // Projection actually filters out stuff: `res` misses some
                     // grades to be readily used by the underlying expr
@@ -82,15 +113,16 @@ impl<T: GradedInput> GaExpr<T> {
 
     fn eval_gp<R>(
         &self,
-        e_left: &GaExpr<T>,
-        e_right: &GaExpr<T>,
+        e_left: &ReadyGaExpr<T>,
+        e_right: &ReadyGaExpr<T>,
         alg: &ReadyAlgebra<impl MetricAlgebra>,
+        cache: &mut Cache<R>,
         mv_res: &mut R,
     ) where
-        R: GradedInput + GradedOutput,
+        R: GradedInput + GradedOutput + Clone,
     {
-        let mv_left: R = e_left.eval(alg);
-        let mv_right: R = e_right.eval(alg);
+        let mv_left: R = e_left.eval_with_cache(alg, cache);
+        let mv_right: R = e_right.eval_with_cache(alg, cache);
         for (_, k_left, k_right) in self
             .grade_set()
             .iter_contributions_to_gp(&e_left.grade_set(), &e_right.grade_set())
@@ -115,13 +147,10 @@ mod tests {
     use crate::{algebra::*, grade_map_mv, graded::GradeMapMV};
     use rstest::*;
 
-    /// Tests that a GaExpr returns the correct result with AND without the use
-    /// of the grade minimisation phase
     macro_rules! expr_eq {
         ($alg:ident, $a:expr, $b:expr) => {{
             let a = $a;
             let b = $b;
-            //assert_eq!(a.eval::<GradeMapMV>(&$alg), b);
             assert_eq!(a.minimize_grades().eval::<GradeMapMV>(&$alg), b);
         }};
     }
