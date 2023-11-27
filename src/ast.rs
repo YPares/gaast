@@ -10,6 +10,12 @@ use std::{
 };
 use AstNode as N;
 
+#[derive(Hash, Debug)]
+pub enum ScalarUnaryOp {
+    Inversion,
+    SquareRoot,
+}
+
 /// The abstract syntax tree nodes representing geometric algebra primitive
 /// operations. `T` is some raw multivector type, and `E` is a boxed type itself
 /// containing an `AstNode`.
@@ -35,8 +41,8 @@ pub enum AstNode<E, T> {
     Reverse(E),
     /// Grade involution (or main involution)
     GradeInvolution(E),
-    /// Invert the scalar part
-    ScalarInversion(E),
+    /// Operate only on the scalar part
+    ScalarUnaryOp(ScalarUnaryOp, E),
 }
 
 /// Assign a [`GradeSet`] to some [`AstNode`]. This [`GradeSet`] can be modified
@@ -223,8 +229,20 @@ impl<T> GaExpr<T> {
     /// Raise to some power. Shortcut for `exp(log(self) * p)`, usually with `p`
     /// evaluating to a scalar. Therefore, please refer to [`Self::log`] and
     /// [`Self::exp`] for limitations
-    pub fn pow(self, p: GaExpr<T>) -> Self {
+    pub fn pow(self, p: impl Into<GaExpr<T>>) -> Self {
         GaExpr::exp(GaExpr::log(self) * p)
+    }
+
+    pub fn sqrt(self) -> Self
+    where
+        T: GradedDataMut,
+    {
+        if self.rc.borrow_gs().is_just(0) {
+            let gs = self.rc.borrow_gs().clone();
+            Self::wrap(gs, N::ScalarUnaryOp(ScalarUnaryOp::SquareRoot, self))
+        } else {
+            self.pow(0.5)
+        }
     }
 
     /// Grade projection: a.g(k) = \<a\>_k
@@ -254,7 +272,7 @@ impl<T> GaExpr<T> {
         if self.rc.borrow_gs().is_just(0) {
             // Regular scalar inversion
             let gs = self.rc.borrow_gs().clone();
-            Self::wrap(gs, N::ScalarInversion(self))
+            Self::wrap(gs, N::ScalarUnaryOp(ScalarUnaryOp::Inversion, self))
         } else {
             self.clone().rev() * self.norm_sq().inv()
         }
@@ -291,7 +309,7 @@ impl<T> GaExpr<T> {
             | N::Negation(e)
             | N::Reverse(e)
             | N::GradeInvolution(e)
-            | N::ScalarInversion(e) => {
+            | N::ScalarUnaryOp(_, e) => {
                 e.propagate_grade_hints(wanted);
             }
             N::Addition(e1, e2) => {
@@ -320,7 +338,7 @@ impl<T> GaExpr<T> {
             | N::GradeProjection(e, _)
             | N::Reverse(e)
             | N::GradeInvolution(e)
-            | N::ScalarInversion(e)
+            | N::ScalarUnaryOp(_, e)
             | N::Exponential(e)
             | N::Logarithm(e) => {
                 e.apply_grade_hints();

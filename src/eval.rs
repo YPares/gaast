@@ -19,11 +19,7 @@ impl<T: GradedData> ReadyGaExpr<T> {
         self.eval_with_cache(alg, &mut HashMap::new())
     }
 
-    fn eval_with_cache<R>(
-        &self,
-        alg: &ReadyAlgebra<impl MetricAlgebra>,
-        cache: &mut Cache<R>,
-    ) -> R
+    fn eval_with_cache<R>(&self, alg: &ReadyAlgebra<impl MetricAlgebra>, cache: &mut Cache<R>) -> R
     where
         R: GradedDataMut + Clone,
     {
@@ -89,10 +85,13 @@ impl<T: GradedData> ReadyGaExpr<T> {
                     }
                 }
             }
-            N::ScalarInversion(e) => {
+            N::ScalarUnaryOp(op, e) => {
                 e.add_to_res(alg, cache, res);
                 let s = res.grade_slice_mut(0);
-                s[0] = 1.0 / s[0];
+                s[0] = match op {
+                    ScalarUnaryOp::Inversion => 1.0 / s[0],
+                    ScalarUnaryOp::SquareRoot => s[0].sqrt(),
+                }
             }
             N::GradeProjection(e, _) => {
                 if self.grade_set() == e.grade_set() {
