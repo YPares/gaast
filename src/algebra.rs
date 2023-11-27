@@ -7,7 +7,7 @@
 use super::{
     ast::{mv, GaExpr},
     grade_set::{Grade, GradeSet},
-    graded::GradedOutput,
+    graded::GradedDataMut,
 };
 use bitvec::prelude::*;
 use num_bigint::BigUint;
@@ -179,7 +179,7 @@ impl<const D: usize> MetricAlgebra for [f64; D] {
 impl<const D: usize> ReadyAlgebra<[f64; D]> {
     /// Return the base vectors of the algebra, whose number can be known
     /// statically here
-    pub fn base_vec_exprs<T: GradedOutput>(&self) -> [GaExpr<T>; D] {
+    pub fn base_vec_exprs<T: GradedDataMut>(&self) -> [GaExpr<T>; D] {
         array_init::array_init(|i| {
             let mut v = T::init_null_mv(D, &GradeSet::single(1));
             v.grade_slice_mut(1)[i] = 1.0;

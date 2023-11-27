@@ -29,7 +29,7 @@ impl Graded for GradeSet {
 
 /// The trait for all objects that are graded and contain readable data
 /// (components) associated to each grade
-pub trait GradedInput: Graded {
+pub trait GradedData: Graded {
     /// Get a slice to the components of the k-vector part, given k. The length
     /// of the slice must exactly correspond to what is expected for that grade
     fn grade_slice(&self, k: Grade) -> &[f64];
@@ -37,7 +37,7 @@ pub trait GradedInput: Graded {
 
 /// The trait for all objects that are graded and contain writeable data
 /// (components) associated to each grade
-pub trait GradedOutput: Graded {
+pub trait GradedDataMut: GradedData {
     /// Create a multivector that contains all the components to hold data of
     /// given grade for a given vector space dimension. All components are
     /// initialized to zero
@@ -53,7 +53,7 @@ pub trait GradedOutput: Graded {
         }
     }
     /// Add to `self` part of another multivector
-    fn add_grades_from<T: GradedInput>(&mut self, input: &T, grades_to_add: &GradeSet) {
+    fn add_grades_from<T: GradedData>(&mut self, input: &T, grades_to_add: &GradeSet) {
         let igs = input.grade_set();
         for k in grades_to_add.iter() {
             if igs.borrow().contains(k) {
@@ -76,7 +76,7 @@ macro_rules! Graded_blanket_impls {
                     (**self).grade_set()
                 }
             }
-            impl<T: GradedInput> GradedInput for $ref<T> {
+            impl<T: GradedData> GradedData for $ref<T> {
                 fn grade_slice(&self, k: Grade) -> &[f64] {
                     (**self).grade_slice(k)
                 }
@@ -86,7 +86,7 @@ macro_rules! Graded_blanket_impls {
 }
 Graded_blanket_impls!(Box, Rc, Arc);
 
-impl<T: GradedOutput> GradedOutput for Box<T> {
+impl<T: GradedDataMut> GradedDataMut for Box<T> {
     fn grade_slice_mut(&mut self, k: Grade) -> &mut [f64] {
         (**self).grade_slice_mut(k)
     }
@@ -104,13 +104,13 @@ impl Graded for f64 {
         GradeSet::single(0)
     }
 }
-impl GradedInput for f64 {
+impl GradedData for f64 {
     fn grade_slice(&self, k: Grade) -> &[f64] {
         assert!(k == 0);
         std::slice::from_ref(self)
     }
 }
-impl GradedOutput for f64 {
+impl GradedDataMut for f64 {
     fn grade_slice_mut(&mut self, k: Grade) -> &mut [f64] {
         assert!(k == 0);
         std::slice::from_mut(self)
@@ -137,12 +137,12 @@ impl Graded for GradeMapMV {
             .fold(GradeSet::empty(), |acc, &k| acc.add_grade(k))
     }
 }
-impl GradedInput for GradeMapMV {
+impl GradedData for GradeMapMV {
     fn grade_slice(&self, k: Grade) -> &[f64] {
         &self.0[&k]
     }
 }
-impl GradedOutput for GradeMapMV {
+impl GradedDataMut for GradeMapMV {
     fn grade_slice_mut(&mut self, k: Grade) -> &mut [f64] {
         self.0.get_mut(&k).unwrap()
     }

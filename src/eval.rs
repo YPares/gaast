@@ -7,14 +7,14 @@ use AstNode as N;
 
 type Cache<R> = HashMap<ExprId, R>;
 
-impl<T: GradedInput> ReadyGaExpr<T> {
+impl<T: GradedData> ReadyGaExpr<T> {
     /// Evaluates a [`GaExpr`]. The given [`MetricAlgebra`] must make sense with
     /// respect to the input values contained in the [`GaExpr`], in terms of
     /// possible grades contained in those input values, and of number of
     /// components for each grade
     pub fn eval<R>(&self, alg: &ReadyAlgebra<impl MetricAlgebra>) -> R
     where
-        R: GradedInput + GradedOutput + Clone,
+        R: GradedDataMut + Clone,
     {
         self.eval_with_cache(alg, &mut HashMap::new())
     }
@@ -25,7 +25,7 @@ impl<T: GradedInput> ReadyGaExpr<T> {
         cache: &mut Cache<R>,
     ) -> R
     where
-        R: GradedInput + GradedOutput + Clone,
+        R: GradedDataMut + Clone,
     {
         if self.is_reused() {
             match cache.get(&self.identify()) {
@@ -50,7 +50,7 @@ impl<T: GradedInput> ReadyGaExpr<T> {
         cache: &mut Cache<R>,
         res: &mut R,
     ) where
-        R: GradedInput + GradedOutput + Clone,
+        R: GradedDataMut + Clone,
     {
         if self.grade_set().is_empty() {
             // self necessarily evaluates to zero, no need to go further
@@ -119,7 +119,7 @@ impl<T: GradedInput> ReadyGaExpr<T> {
         cache: &mut Cache<R>,
         mv_res: &mut R,
     ) where
-        R: GradedInput + GradedOutput + Clone,
+        R: GradedDataMut + Clone,
     {
         let mv_left: R = e_left.eval_with_cache(alg, cache);
         let mv_right: R = e_right.eval_with_cache(alg, cache);

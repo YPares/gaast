@@ -1,6 +1,6 @@
 //! Represent a GA expression using an abstract syntax tree
 
-use crate::graded::GradedOutput;
+use crate::graded::GradedDataMut;
 
 use super::{grade_set::*, graded::Graded};
 use std::{
@@ -142,7 +142,7 @@ impl<T, E: Into<GaExpr<T>>> std::ops::Sub<E> for GaExpr<T> {
     }
 }
 
-impl<T: GradedOutput> From<f64> for GaExpr<T> {
+impl<T: GradedDataMut> From<f64> for GaExpr<T> {
     fn from(x: f64) -> GaExpr<T> {
         if x == 0.0 {
             return mv(T::init_null_mv(0, &GradeSet::empty()));
@@ -152,7 +152,7 @@ impl<T: GradedOutput> From<f64> for GaExpr<T> {
         mv(scal_mv)
     }
 }
-impl<T: GradedOutput> From<i64> for GaExpr<T> {
+impl<T: GradedDataMut> From<i64> for GaExpr<T> {
     #[inline]
     fn from(x: i64) -> GaExpr<T> {
         (x as f64).into()
@@ -162,21 +162,21 @@ impl<T: GradedOutput> From<i64> for GaExpr<T> {
 macro_rules! scalar_with_gaexpr_binary_ops {
     ($($t:ty),*) => {
         $(
-        impl<T: GradedOutput> std::ops::Add<GaExpr<T>> for $t {
+        impl<T: GradedDataMut> std::ops::Add<GaExpr<T>> for $t {
             type Output = GaExpr<T>;
             #[inline]
             fn add(self, rhs: GaExpr<T>) -> Self::Output {
                 Into::<GaExpr<T>>::into(self) + rhs
             }
         }
-        impl<T: GradedOutput> std::ops::Mul<GaExpr<T>> for $t {
+        impl<T: GradedDataMut> std::ops::Mul<GaExpr<T>> for $t {
             type Output = GaExpr<T>;
             #[inline]
             fn mul(self, rhs: GaExpr<T>) -> Self::Output {
                 Into::<GaExpr<T>>::into(self) * rhs
             }
         }
-        impl<T: GradedOutput> std::ops::Div<$t> for GaExpr<T> {
+        impl<T: GradedDataMut> std::ops::Div<$t> for GaExpr<T> {
             type Output = Self;
             fn div(self, rhs: $t) -> Self {
                 self * (1.0/(rhs as f64))
