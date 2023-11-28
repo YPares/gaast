@@ -10,7 +10,7 @@ use super::{
     graded::GradedDataMut,
 };
 use bitvec::prelude::*;
-use num_bigint::BigUint;
+use num_bigint::{BigInt, BigUint};
 
 // # TYPES & TRAITS //
 
@@ -112,7 +112,10 @@ impl<A: Algebra> ReadyAlgebra<A> {
         &self.basis_blades[k][pos_in_grade]
     }
 
-    pub fn indexes_from_basis_blade<'a>(&'a self, BasisBlade(b0): &'a BasisBlade) -> (Grade, usize) {
+    pub fn indexes_from_basis_blade<'a>(
+        &'a self,
+        BasisBlade(b0): &'a BasisBlade,
+    ) -> (Grade, usize) {
         let k = b0.count_ones() as usize;
         for (i, BasisBlade(b)) in self.basis_blades[k].iter().enumerate() {
             if b0 == b {
@@ -217,6 +220,36 @@ impl MetricAlgebra for OrthoEuclidN {
 
 // # UTILITY FUNCTIONS //
 
+/// Given a word with exactly k bits at 1, generates the lexicographically next
+/// bit permutation (the next smallest word with k bits at 1)
+///
+/// See
+/// https://graphics.stanford.edu/%7Eseander/bithacks.html#NextBitPermutation
+/// (we use the second version as it doesn't require a bit NOT operator, which
+/// doesn't exist on variable-size BigInts)
+pub fn next_bit_permutation(v: &BigInt) -> BigInt {
+    if v == &BigInt::from(0u32) {
+        return v.clone();
+    }
+    let one = BigInt::from(1);
+    let t: BigInt = (v.clone() | (v.clone() - one.clone())) + one.clone();
+    t.clone() | ((((t.clone() & -t) / (v.clone() & -v)) >> 1) - one)
+}
+
+/// Yield in ascending order all the n-bit words with exactly k bits at 1
+pub fn all_bit_permutations(n: usize, k: usize) -> impl Iterator<Item = BigUint> {
+    let mut x = BigInt::from(0u32);
+    for _ in 0..k {
+        x <<= 1;
+        x += BigInt::from(1u32);
+    }
+    (0..n_choose_k(n, k)).map(move |_| {
+        let z = x.clone();
+        x = next_bit_permutation(&z);
+        z.to_biguint().unwrap()
+    })
+}
+
 /// Computes n! / (k! * (n-k)!)
 pub(crate) const fn n_choose_k(n: Grade, k: Grade) -> usize {
     if k <= 0 {
@@ -264,6 +297,8 @@ mod tests {
     simple_eqs! {
         n_choose_zero: n_choose_k(5, 0) => 1,
         zero_choose_zero: n_choose_k(0, 0) => 1,
-        three_choose_two: n_choose_k(3, 2) => 3
+        three_choose_two: n_choose_k(3, 2) => 3,
+        bit_permuts: all_bit_permutations(4, 2).map(|i| i.to_u32_digits()[0]).collect::<Vec<_>>()
+            => vec![0b11, 0b101, 0b110, 0b1001, 0b1010, 0b1100]
     }
 }
