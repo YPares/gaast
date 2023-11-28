@@ -11,6 +11,7 @@ use super::{
 };
 use bitvec::prelude::*;
 use num_bigint::{BigInt, BigUint};
+use num_traits::Zero;
 
 // # TYPES & TRAITS //
 
@@ -97,7 +98,7 @@ impl<A: Algebra> ReadyAlgebra<A> {
         let mut basis_blades: Vec<_> = (0..alg.num_grades())
             .map(|k| Vec::with_capacity(alg.grade_dim(k)))
             .collect();
-        let mut cur_blade = BigUint::from(0u32);
+        let mut cur_blade = BigUint::zero();
         let max = alg.algebraic_dim();
         while cur_blade < max {
             let k = cur_blade.count_ones() as usize;
@@ -223,25 +224,22 @@ impl MetricAlgebra for OrthoEuclidN {
 /// Given a word with exactly k bits at 1, generates the lexicographically next
 /// bit permutation (the next smallest word with k bits at 1)
 ///
-/// See
-/// https://graphics.stanford.edu/%7Eseander/bithacks.html#NextBitPermutation
 /// (we use the second version as it doesn't require a bit NOT operator, which
 /// doesn't exist on variable-size BigInts)
 pub fn next_bit_permutation(v: &BigInt) -> BigInt {
-    if v == &BigInt::from(0u32) {
+    if v == &BigInt::zero() {
         return v.clone();
     }
-    let one = BigInt::from(1);
-    let t: BigInt = (v.clone() | (v.clone() - one.clone())) + one.clone();
-    t.clone() | ((((t.clone() & -t) / (v.clone() & -v)) >> 1) - one)
+    let t: BigInt = (v.clone() | (v.clone() - 1)) + 1;
+    t.clone() | ((((t.clone() & -t) / (v.clone() & -v)) >> 1) - 1)
 }
 
-/// Yield in ascending order all the n-bit words with exactly k bits at 1
+/// Yield in ascending order all the `n`-bit words with exactly `k` bits equal
+/// to 1
 pub fn all_bit_permutations(n: usize, k: usize) -> impl Iterator<Item = BigUint> {
-    let mut x = BigInt::from(0u32);
-    for _ in 0..k {
-        x <<= 1;
-        x += BigInt::from(1u32);
+    let mut x = BigInt::zero();
+    for i in 0..k {
+        x.set_bit(i as u64, true)
     }
     (0..n_choose_k(n, k)).map(move |_| {
         let z = x.clone();
@@ -250,38 +248,58 @@ pub fn all_bit_permutations(n: usize, k: usize) -> impl Iterator<Item = BigUint>
     })
 }
 
-/// Computes n! / (k! * (n-k)!)
-pub(crate) const fn n_choose_k(n: Grade, k: Grade) -> usize {
-    if k <= 0 {
-        return 1;
-    };
-    let mut res = n;
-    let mut i = n - k + 1;
-    loop {
-        if i >= n {
-            break;
+/// Directly computes the nth term of the lexicographic permutation suite of
+/// `n`-bit words with exactly `k` bits equal to 1. `O(n)` time complexity.
+///
+/// `i` starts at `0`.
+///
+/// See first answer of https://math.stackexchange.com/questions/1304731/computing-the-n-textrmth-permutation-of-bits
+/// 
+/// See also
+/// https://graphics.stanford.edu/%7Eseander/bithacks.html#NextBitPermutation
+/// about a way to enumerate all bitfields in lexicographic order
+pub fn idx_to_bitfield_permut(n: usize, mut k: usize, mut i: usize) -> BigUint {
+    let mut res = BigUint::zero();
+    for b in 1..=n {
+        let z = n_choose_k(n - b, k);
+        if i >= z {
+            res.set_bit((n - b) as u64, true);
+            i -= z;
+            k -= 1; // We just set one bit to 1, so k-1 bits remain to be set to 1
         }
-        res *= i;
-        i += 1;
     }
-    let mut k_fac = k;
-    let mut i = 2;
-    loop {
-        if i >= k {
-            break;
+    res
+}
+
+/// Does the reverse of [`idx_to_bitfield_permut`]: given a bitfield, finds its
+/// index (starting at `0`) in the lexicographic permutation suite
+pub fn bitfield_permut_to_idx(n: usize, v: &BigUint) -> usize {
+    let mut res = 0;
+    let mut k = v.count_ones() as usize;
+    for b in 1..=n {
+        let z = n_choose_k(n - b, k);
+        if v.bit((n - b) as u64) {
+            res += z;
+            k -= 1;
         }
-        k_fac *= i;
-        i += 1;
     }
-    res / k_fac
+    res
+}
+
+/// Binomial coefficient ("n choose k", or "k amongst n")
+///
+// #[memoize::memoize]
+#[inline]
+pub fn n_choose_k(n: usize, k: usize) -> usize {
+    num_integer::binomial(n, k)
 }
 
 // /// Computes `sum(for i = 0 to k)(n_choose_i)`
 // ///
 // /// ie. 1 + n + n(n-1)/2 + n(n-1)(n-2)/(2*3) + n(n-1)(n-3)/(2*3*4) + ...
 // pub(crate) fn sum_n_choose_ks(n: Grade, k: Grade) -> BigUint {
-//     let mut coef = BigUint::from(1u32);
-//     let mut sum = BigUint::from(1u32);
+//     let mut coef = BigUint::one();
+//     let mut sum = BigUint::one();
 //     for i in 1..=k {
 //         coef *= (coef.clone() * (n - i + 1)) / i;
 //         sum += coef.clone();
@@ -298,7 +316,23 @@ mod tests {
         n_choose_zero: n_choose_k(5, 0) => 1,
         zero_choose_zero: n_choose_k(0, 0) => 1,
         three_choose_two: n_choose_k(3, 2) => 3,
-        bit_permuts: all_bit_permutations(4, 2).map(|i| i.to_u32_digits()[0]).collect::<Vec<_>>()
-            => vec![0b11, 0b101, 0b110, 0b1001, 0b1010, 0b1100]
+        bit_permuts_1: all_bit_permutations(4, 2).map(|i| i.to_u32_digits()[0]).collect::<Vec<_>>()
+            => vec![0b11, 0b101, 0b110, 0b1001, 0b1010, 0b1100],
+        bit_permuts_2: all_bit_permutations(10, 5).collect::<Vec<_>>()
+            => (0..n_choose_k(10, 5)).map(|i| idx_to_bitfield_permut(10, 5, i)).collect::<Vec<_>>()
+    }
+
+    #[test]
+    fn idx_bitfield_permut_roundtrip() {
+        let indexes = (0..n_choose_k(10, 5)).collect::<Vec<_>>();
+        let indexes2 = indexes.iter().map(|i| bitfield_permut_to_idx(10, &idx_to_bitfield_permut(10, 5, *i))).collect::<Vec<_>>();
+        assert_eq!(indexes, indexes2);
+    }
+
+    #[test]
+    fn bitfield_permut_idx_roundtrip() {
+        let bitfields = (0..n_choose_k(9, 4)).map(|i| idx_to_bitfield_permut(9, 4, i)).collect::<Vec<_>>();
+        let bitfields2 = bitfields.iter().map(|b| idx_to_bitfield_permut(9, 4, bitfield_permut_to_idx(9, b))).collect::<Vec<_>>();
+        assert_eq!(bitfields, bitfields2);
     }
 }
