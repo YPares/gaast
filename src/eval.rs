@@ -130,7 +130,7 @@ impl<T: GradedData> ReadyGaExpr<T> {
                 for (i_right, c_right) in mv_right.grade_slice(k_right).iter().enumerate() {
                     let bb_left = alg.basis_blade_from_indexes(k_left, i_left);
                     let bb_right = alg.basis_blade_from_indexes(k_right, i_right);
-                    let (bb_res, coef) = alg.ortho_basis_blades_gp(bb_left, bb_right);
+                    let (bb_res, coef) = alg.ortho_basis_blades_gp(&bb_left, &bb_right);
                     let (k_res, i_res) = alg.indexes_from_basis_blade(&bb_res);
                     if self.grade_set().contains(k_res) {
                         mv_res.grade_slice_mut(k_res)[i_res] += c_left * c_right * coef;

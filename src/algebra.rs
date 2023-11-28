@@ -10,8 +10,7 @@ use super::{
     graded::GradedDataMut,
 };
 use bitvec::prelude::*;
-use num_bigint::{BigInt, BigUint};
-use num_traits::Zero;
+use num_bigint::BigUint;
 
 // # TYPES & TRAITS //
 
@@ -47,7 +46,22 @@ pub trait MetricAlgebra: Algebra {
 
 /// A basis blade in some algebra, of the form `1`, `eX`, `eX^eY`, `eX^eY^eZ`,
 /// etc.
-pub struct BasisBlade(BitVec<u8>);
+///
+/// Basis blade representation follows the convention described in _Dorst, L.,
+/// Fontijne, D., & Mann, S. (2010). Geometric algebra for computer science: an
+/// object-oriented approach to geometry. Elsevier._ Each bit represents a base
+/// vector of the underlying vector space, so eg.:
+/// - 0000000000000 is the scalar unique base blade (`1`)
+/// - 1000000000000 is the first vector (e1)
+/// - 0100000000000 is the second vector (e2)
+/// - 1110000000000 is the trivector e1 ^ e2 ^ e3, etc.
+///
+/// The length of each bitfield is the dim of the underlying vector
+/// space. Note that bitvec considers the first bit to be the leftmost
+/// (accesses are done like a vector, from left to right, regardless of
+/// the underlying storage being MSB or LSB)
+#[derive(Clone)]
+pub struct BasisBlade(BitVec);
 
 impl std::fmt::Debug for BasisBlade {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -63,11 +77,6 @@ impl std::fmt::Debug for BasisBlade {
 #[derive(Debug)]
 pub struct ReadyAlgebra<A> {
     alg: A,
-    /// Each basis blade used by this algebra associated to its index.
-    /// Invariant: elements at position `n` in the outer vec should always have
-    /// exactly `n` bits to 1. (So at pos 0, the only possibility in the
-    /// singleton vec containing an empty bitfield)
-    basis_blades: Vec<Vec<BasisBlade>>,
 }
 
 /// So the algebra methods can still be called through ReadyAlgebra
@@ -81,64 +90,40 @@ impl<A> std::ops::Deref for ReadyAlgebra<A> {
 impl<A: Algebra> ReadyAlgebra<A> {
     /// Prepare an Algebra so it is ready to be used for evaluating expressions
     pub fn from(alg: A) -> Self {
-        // Give a name (as a bitfield) to each basis blade of the algebra. This
-        // follows the convention described in `Dorst, L., Fontijne, D., & Mann,
-        // S. (2010). Geometric algebra for computer science: an object-oriented
-        // approach to geometry. Elsevier`. Each bit represents a base vector of
-        // the underlying vector space, so eg.:
-        // - 0000000000000 is the scalar unique base blade `1`
-        // - 1000000000000 is the first vector (e1)
-        // - 0100000000000 is the second vector (e2)
-        // - 1110000000000 is the trivector e1 ^ e2 ^ e3, etc.
-        //
-        // The length of each bitfield being the dim of the underlying vector
-        // space. Note that bitvec considers the first bit to be the leftmost
-        // (accesses are done like a vector, from left to right, regardless of
-        // the underlying storage being MSB or LSB)
-        let mut basis_blades: Vec<_> = (0..alg.num_grades())
-            .map(|k| Vec::with_capacity(alg.grade_dim(k)))
-            .collect();
-        let mut cur_blade = BigUint::zero();
-        let max = alg.algebraic_dim();
-        while cur_blade < max {
-            let k = cur_blade.count_ones() as usize;
-            let bv = BitVec::from_vec(cur_blade.to_bytes_le());
-            basis_blades[k].push(BasisBlade(bv));
-            cur_blade += 1u32;
-        }
-        ReadyAlgebra { alg, basis_blades }
+        ReadyAlgebra { alg }
     }
 
-    pub fn basis_blade_from_indexes(&self, k: Grade, pos_in_grade: usize) -> &BasisBlade {
-        &self.basis_blades[k][pos_in_grade]
+    /// Given a grade and an index in a slice storing that grade's components,
+    /// find the associated [`BasisBlade`]
+    pub fn basis_blade_from_indexes(&self, k: Grade, pos_in_grade: usize) -> BasisBlade {
+        BasisBlade(idx_to_bitfield_permut(
+            self.vec_space_dim(),
+            k,
+            pos_in_grade,
+        ))
     }
 
-    pub fn indexes_from_basis_blade<'a>(
-        &'a self,
-        BasisBlade(b0): &'a BasisBlade,
-    ) -> (Grade, usize) {
-        let k = b0.count_ones() as usize;
-        for (i, BasisBlade(b)) in self.basis_blades[k].iter().enumerate() {
-            if b0 == b {
-                return (k, i); // TODO. This is crap. To be improved
-            }
-        }
-        panic!("coord_from_basis_blade: BasisBlade {b0} not found");
+    /// Does the reverse: for some [`BasisBlade`], find its grade and its index
+    /// in the slice of components for that grade
+    pub fn indexes_from_basis_blade<'a>(&'a self, BasisBlade(b): &'a BasisBlade) -> (Grade, usize) {
+        let k = b.count_ones() as usize;
+        let pos = bitfield_permut_to_idx(self.vec_space_dim(), k, b);
+        (k, pos)
     }
 }
 
-fn canonical_reordering_sign(mut b1: BitVec<u8>, b2: &BitVec<u8>) -> f64 {
-    b1.shift_left(1);
-    let mut sum = 0;
-    while b1.any() {
-        sum += (b1.clone() & b2.clone()).count_ones();
+/// When two basis blades are multiplied, computes whether we should add a minus
+/// sign or not (for anticommutativity of basis vectors)
+fn canonical_reordering_sign(mut b1: BitVec, b2: &BitVec) -> f64 {
+    let mut sum: i32 = 0;
+    loop {
         b1.shift_left(1);
+        sum += (b1.clone() & b2.clone()).count_ones() as i32;
+        if b1.not_any() {
+            break;
+        }
     }
-    if sum & 1 == 0 {
-        1.0
-    } else {
-        -1.0
-    }
+    (1 - (sum % 2) * 2) as f64 // -1 if sum odd, +1 if even
 }
 
 impl<A: MetricAlgebra> ReadyAlgebra<A> {
@@ -221,49 +206,22 @@ impl MetricAlgebra for OrthoEuclidN {
 
 // # UTILITY FUNCTIONS //
 
-/// Given a word with exactly k bits at 1, generates the lexicographically next
-/// bit permutation (the next smallest word with k bits at 1)
-///
-/// (we use the second version as it doesn't require a bit NOT operator, which
-/// doesn't exist on variable-size BigInts)
-pub fn next_bit_permutation(v: &BigInt) -> BigInt {
-    if v == &BigInt::zero() {
-        return v.clone();
-    }
-    let t: BigInt = (v.clone() | (v.clone() - 1)) + 1;
-    t.clone() | ((((t.clone() & -t) / (v.clone() & -v)) >> 1) - 1)
-}
-
-/// Yield in ascending order all the `n`-bit words with exactly `k` bits equal
-/// to 1
-pub fn all_bit_permutations(n: usize, k: usize) -> impl Iterator<Item = BigUint> {
-    let mut x = BigInt::zero();
-    for i in 0..k {
-        x.set_bit(i as u64, true)
-    }
-    (0..n_choose_k(n, k)).map(move |_| {
-        let z = x.clone();
-        x = next_bit_permutation(&z);
-        z.to_biguint().unwrap()
-    })
-}
-
 /// Directly computes the nth term of the lexicographic permutation suite of
 /// `n`-bit words with exactly `k` bits equal to 1. `O(n)` time complexity.
 ///
 /// `i` starts at `0`.
 ///
 /// See first answer of https://math.stackexchange.com/questions/1304731/computing-the-n-textrmth-permutation-of-bits
-/// 
+///
 /// See also
 /// https://graphics.stanford.edu/%7Eseander/bithacks.html#NextBitPermutation
 /// about a way to enumerate all bitfields in lexicographic order
-pub fn idx_to_bitfield_permut(n: usize, mut k: usize, mut i: usize) -> BigUint {
-    let mut res = BigUint::zero();
+pub fn idx_to_bitfield_permut(n: usize, mut k: usize, mut i: usize) -> BitVec {
+    let mut res = bitvec![0; n];
     for b in 1..=n {
         let z = n_choose_k(n - b, k);
         if i >= z {
-            res.set_bit((n - b) as u64, true);
+            res.set(n - b, true);
             i -= z;
             k -= 1; // We just set one bit to 1, so k-1 bits remain to be set to 1
         }
@@ -273,12 +231,11 @@ pub fn idx_to_bitfield_permut(n: usize, mut k: usize, mut i: usize) -> BigUint {
 
 /// Does the reverse of [`idx_to_bitfield_permut`]: given a bitfield, finds its
 /// index (starting at `0`) in the lexicographic permutation suite
-pub fn bitfield_permut_to_idx(n: usize, v: &BigUint) -> usize {
+pub fn bitfield_permut_to_idx(n: usize, mut k: usize, v: &BitVec) -> usize {
     let mut res = 0;
-    let mut k = v.count_ones() as usize;
     for b in 1..=n {
         let z = n_choose_k(n - b, k);
-        if v.bit((n - b) as u64) {
+        if *v.get(n - b).as_deref().unwrap_or(&false) {
             res += z;
             k -= 1;
         }
@@ -315,24 +272,28 @@ mod tests {
     simple_eqs! {
         n_choose_zero: n_choose_k(5, 0) => 1,
         zero_choose_zero: n_choose_k(0, 0) => 1,
-        three_choose_two: n_choose_k(3, 2) => 3,
-        bit_permuts_1: all_bit_permutations(4, 2).map(|i| i.to_u32_digits()[0]).collect::<Vec<_>>()
-            => vec![0b11, 0b101, 0b110, 0b1001, 0b1010, 0b1100],
-        bit_permuts_2: all_bit_permutations(10, 5).collect::<Vec<_>>()
-            => (0..n_choose_k(10, 5)).map(|i| idx_to_bitfield_permut(10, 5, i)).collect::<Vec<_>>()
+        three_choose_two: n_choose_k(3, 2) => 3
     }
 
     #[test]
     fn idx_bitfield_permut_roundtrip() {
         let indexes = (0..n_choose_k(10, 5)).collect::<Vec<_>>();
-        let indexes2 = indexes.iter().map(|i| bitfield_permut_to_idx(10, &idx_to_bitfield_permut(10, 5, *i))).collect::<Vec<_>>();
+        let indexes2 = indexes
+            .iter()
+            .map(|i| bitfield_permut_to_idx(10, 5, &idx_to_bitfield_permut(10, 5, *i)))
+            .collect::<Vec<_>>();
         assert_eq!(indexes, indexes2);
     }
 
     #[test]
     fn bitfield_permut_idx_roundtrip() {
-        let bitfields = (0..n_choose_k(9, 4)).map(|i| idx_to_bitfield_permut(9, 4, i)).collect::<Vec<_>>();
-        let bitfields2 = bitfields.iter().map(|b| idx_to_bitfield_permut(9, 4, bitfield_permut_to_idx(9, b))).collect::<Vec<_>>();
+        let bitfields = (0..n_choose_k(9, 4))
+            .map(|i| idx_to_bitfield_permut(9, 4, i))
+            .collect::<Vec<_>>();
+        let bitfields2 = bitfields
+            .iter()
+            .map(|b| idx_to_bitfield_permut(9, 4, bitfield_permut_to_idx(9, 4, b)))
+            .collect::<Vec<_>>();
         assert_eq!(bitfields, bitfields2);
     }
 }
