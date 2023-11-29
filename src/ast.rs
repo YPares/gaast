@@ -225,6 +225,18 @@ impl<T> GaExpr<T> {
         log Logarithm log "Natural logarithm. IMPORTANT: Is defined only for multivectors of the form \\<A\\>_0 + \\<A\\>_k"
     }
 
+    /// Return the expressions for the base vectors in a vector space of dim `D`
+    pub fn base_vecs<const D: usize>() -> [Self; D]
+    where
+        T: GradedDataMut,
+    {
+        array_init::array_init(|i| {
+            let mut v = T::init_null_mv(D, &GradeSet::single(1));
+            v.grade_slice_mut(1)[i] = 1.0;
+            mv(v)
+        })
+    }
+
     /// Raise to some power. Shortcut for `exp(log(self) * p)`, usually with `p`
     /// evaluating to a scalar. Therefore, please refer to [`Self::log`] and
     /// [`Self::exp`] for limitations

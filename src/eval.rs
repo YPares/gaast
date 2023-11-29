@@ -12,14 +12,14 @@ impl<T: GradedData> ReadyGaExpr<T> {
     /// respect to the input values contained in the [`GaExpr`], in terms of
     /// possible grades contained in those input values, and of number of
     /// components for each grade
-    pub fn eval<R>(&self, alg: &ReadyAlgebra<impl MetricAlgebra>) -> R
+    pub fn eval<R>(&self, alg: &impl MetricAlgebra) -> R
     where
         R: GradedDataMut + Clone,
     {
         self.eval_with_cache(alg, &mut HashMap::new())
     }
 
-    fn eval_with_cache<R>(&self, alg: &ReadyAlgebra<impl MetricAlgebra>, cache: &mut Cache<R>) -> R
+    fn eval_with_cache<R>(&self, alg: &impl MetricAlgebra, cache: &mut Cache<R>) -> R
     where
         R: GradedDataMut + Clone,
     {
@@ -42,7 +42,7 @@ impl<T: GradedData> ReadyGaExpr<T> {
 
     fn add_to_res<R>(
         &self,
-        alg: &ReadyAlgebra<impl MetricAlgebra>,
+        alg: &impl MetricAlgebra,
         cache: &mut Cache<R>,
         res: &mut R,
     ) where
@@ -114,7 +114,7 @@ impl<T: GradedData> ReadyGaExpr<T> {
         &self,
         e_left: &ReadyGaExpr<T>,
         e_right: &ReadyGaExpr<T>,
-        alg: &ReadyAlgebra<impl MetricAlgebra>,
+        alg: &impl MetricAlgebra,
         cache: &mut Cache<R>,
         mv_res: &mut R,
     ) where
@@ -143,8 +143,10 @@ impl<T: GradedData> ReadyGaExpr<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{algebra::*, grade_map_mv, graded::GradeMapMV};
+    use crate::{grade_map_mv, graded::GradeMapMV, GaExpr};
     use rstest::*;
+
+    type E = GaExpr<GradeMapMV>;
 
     macro_rules! expr_eq {
         ($alg:ident, $a:expr, $b:expr) => {{
@@ -154,40 +156,40 @@ mod tests {
         }};
     }
 
-    type Ega3 = ReadyAlgebra<[f64; 3]>;
+    type Ega3 = [f64; 3];
     #[fixture]
     fn ega3() -> Ega3 {
-        ReadyAlgebra::from([1.0, 1.0, 1.0])
+        [1.0, 1.0, 1.0]
     }
 
-    type Pga2 = ReadyAlgebra<[f64; 3]>;
+    type Pga2 = [f64; 3];
     #[fixture]
     fn pga2() -> Pga2 {
-        ReadyAlgebra::from([0.0, 1.0, 1.0])
+        [0.0, 1.0, 1.0]
     }
 
     #[rstest]
     fn vecs_to_bivec(ega3: Ega3) {
-        let [e1, e2, _] = ega3.base_vec_exprs::<GradeMapMV>();
+        let [e1, e2, _] = E::base_vecs();
         let ex = e2 ^ e1;
         expr_eq!(ega3, ex, grade_map_mv!(2 => -1 0 0));
     }
 
     #[rstest]
     fn vecs_to_trivec(ega3: Ega3) {
-        let [e1, e2, e3] = ega3.base_vec_exprs::<GradeMapMV>();
+        let [e1, e2, e3] = E::base_vecs();
         expr_eq!(ega3, e2 ^ e1 ^ e3, grade_map_mv!(3 => -1));
     }
 
     #[rstest]
     fn vec_norm(pga2: Pga2) {
-        let [e0, e1, e2] = pga2.base_vec_exprs::<GradeMapMV>();
+        let [e0, e1, e2] = E::base_vecs();
         expr_eq!(pga2, (e0 - 2 * e1 + e2).norm_sq(), grade_map_mv!(0 => 5));
     }
 
     #[rstest]
     fn projection(ega3: Ega3) {
-        let [e1, e2, e3] = ega3.base_vec_exprs::<GradeMapMV>();
+        let [e1, e2, e3] = E::base_vecs();
         let v = e1.clone() + e2.clone();
         let bv = 4 * e1 ^ e3;
         // project v onto bv:
