@@ -29,7 +29,11 @@ pub trait Algebra {
     /// Given a grade and an index in a slice storing that grade's components,
     /// find the associated [`BasisBlade`]
     fn coord_to_basis_blade(&self, Coord { grade, index }: &Coord) -> BasisBlade {
-        BasisBlade(index_to_bitfield_permut(self.vec_space_dim(), *grade, *index))
+        BasisBlade(index_to_bitfield_permut(
+            self.vec_space_dim(),
+            *grade,
+            *index,
+        ))
     }
 
     /// Does the reverse: for some [`BasisBlade`], find its grade and its index
@@ -39,6 +43,13 @@ pub trait Algebra {
         let index = bitfield_permut_to_index(self.vec_space_dim(), grade, b);
         Coord { grade, index }
     }
+}
+
+pub fn iter_basis_blades_for_grade(
+    alg: &impl Algebra,
+    grade: Grade,
+) -> impl Iterator<Item = BasisBlade> + '_ {
+    (0..alg.grade_dim(grade)).map(move |index| alg.coord_to_basis_blade(&Coord { grade, index }))
 }
 
 /// A metric geometric algebra over some vector space
@@ -67,6 +78,7 @@ pub trait MetricAlgebra: Algebra {
     }
 }
 
+#[derive(Debug)]
 pub struct Coord {
     pub grade: Grade,
     pub index: usize,

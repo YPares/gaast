@@ -62,8 +62,15 @@ impl<T: GradedData> ReadyGaExpr<T> {
                     res.negate_grade(k);
                 }
             }
-            N::GeometricProduct(e_left, e_right) => {
-                self.eval_gp(e_left, e_right, alg, cache, res);
+            N::GeometricProduct(mul_set, e_left, e_right) => {
+                let mv_left: R = e_left.eval_with_cache(alg, cache);
+                let mv_right: R = e_right.eval_with_cache(alg, cache);
+                for op in mul_set.rc.borrow().as_ref().unwrap() {
+                    let x = mv_left.grade_slice(op.left_coord.grade)[op.left_coord.index];
+                    let y = mv_right.grade_slice(op.right_coord.grade)[op.right_coord.index];
+                    let z = &mut res.grade_slice_mut(op.res_coord.grade)[op.res_coord.index];
+                    *z += x * y * op.mul_coef;
+                }
             }
             N::Reverse(e) => {
                 e.add_to_res(alg, cache, res);
@@ -105,46 +112,6 @@ impl<T: GradedData> ReadyGaExpr<T> {
             N::Logarithm(_e) => todo!(),
         }
     }
-
-    fn eval_gp<R>(
-        &self,
-        e_left: &ReadyGaExpr<T>,
-        e_right: &ReadyGaExpr<T>,
-        alg: &impl MetricAlgebra,
-        cache: &mut Cache<R>,
-        mv_res: &mut R,
-    ) where
-        R: GradedDataMut + Clone,
-    {
-        let mv_left: R = e_left.eval_with_cache(alg, cache);
-        let mv_right: R = e_right.eval_with_cache(alg, cache);
-        for (_, k_left, k_right) in self
-            .grade_set()
-            .iter_contributions_to_gp(&e_left.grade_set(), &e_right.grade_set())
-        {
-            for (bb_left, comp_left) in iter_basis_blade_comps(alg, &mv_left, k_left) {
-                for (bb_right, comp_right) in iter_basis_blade_comps(alg, &mv_right, k_right) {
-                    let (bb_res, coef) = alg.ortho_basis_blades_gp(&bb_left, &bb_right);
-                    let coord_res = alg.basis_blade_to_coord(&bb_res);
-                    if self.grade_set().contains(coord_res.grade) {
-                        mv_res.grade_slice_mut(coord_res.grade)[coord_res.index] +=
-                            comp_left * comp_right * coef;
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn iter_basis_blade_comps<'a>(
-    alg: &'a impl MetricAlgebra,
-    mv: &'a impl GradedData,
-    k: usize,
-) -> impl Iterator<Item = (BasisBlade, f64)> + 'a {
-    mv.grade_slice(k)
-        .iter()
-        .enumerate()
-        .map(move |(i, x)| (alg.coord_to_basis_blade(&Coord { grade: k, index: i }), *x))
 }
 
 #[cfg(test)]
@@ -153,7 +120,7 @@ mod tests {
 
     macro_rules! expr_eq {
         ($alg:ident, $a:expr, $b:expr) => {
-            assert_eq!($a.minimize_grades().eval::<GradeMapMV>(&$alg), $b);
+            assert_eq!($a.minimize_grades(&$alg).eval::<GradeMapMV>(&$alg), $b);
         };
     }
 

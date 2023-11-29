@@ -1,7 +1,9 @@
 //! Represent a GA expression using an abstract syntax tree
 
+use crate::algebra::{iter_basis_blades_for_grade, MetricAlgebra};
 use crate::graded::GradedDataMut;
 
+use super::algebra::Coord;
 use super::{grade_set::*, graded::Graded};
 use std::{
     cell::{Ref, RefCell},
@@ -15,6 +17,30 @@ pub enum ScalarUnaryOp {
     SquareRoot,
 }
 
+/// A component-wise multiplication to perform on input data, and where to store
+/// the result in output data
+#[derive(Debug)]
+pub struct MulOp {
+    pub left_coord: Coord,
+    pub right_coord: Coord,
+    pub mul_coef: f64,
+    pub res_coord: Coord,
+}
+
+/// The coord-to-coord multiplications to perform
+#[derive(Debug)]
+pub struct MulSet {
+    pub rc: RefCell<Option<Vec<MulOp>>>,
+}
+
+impl MulSet {
+    pub fn empty() -> Self {
+        MulSet {
+            rc: RefCell::new(None),
+        }
+    }
+}
+
 /// The abstract syntax tree nodes representing geometric algebra primitive
 /// operations. `T` is some raw multivector type, and `E` is a boxed type itself
 /// containing an `AstNode`.
@@ -26,7 +52,7 @@ pub enum AstNode<E, T> {
     /// Multivector addition
     Addition(E, E),
     /// Geometric product
-    GeometricProduct(E, E),
+    GeometricProduct(MulSet, E, E),
     /// Multivector negation
     Negation(E),
     /// Multivector exponentiation. See [`GaExpr::exp`] for limitations
@@ -107,8 +133,23 @@ impl<T> Clone for GaExpr<T> {
     }
 }
 
-macro_rules! gaexpr_binary_ops {
-    ($($trait:ident $method:ident $ctor:ident $doc:literal),*) => {
+/// Multivector addition
+impl<T, E: Into<GaExpr<T>>> std::ops::Add<E> for GaExpr<T> {
+    type Output = Self;
+    #[doc = "Multivector addition"]
+    fn add(self, rhs: E) -> Self::Output {
+        let e_rhs = rhs.into();
+        let gs = self
+            .rc
+            .borrow_gs()
+            .clone()
+            .add(e_rhs.rc.borrow_gs().clone());
+        Self::wrap(gs, N::Addition(self, e_rhs))
+    }
+}
+
+macro_rules! gaexpr_products {
+    ($($trait:ident $method:ident $doc:literal),*) => {
         $(
         #[doc=$doc]
         impl<T, E: Into<GaExpr<T>>> std::ops::$trait<E> for GaExpr<T> {
@@ -117,19 +158,19 @@ macro_rules! gaexpr_binary_ops {
             fn $method(self, rhs: E) -> Self::Output {
                 let e_rhs = rhs.into();
                 let gs = self.rc.borrow_gs().clone().$method(e_rhs.rc.borrow_gs().clone());
-                Self::wrap(gs, N::$ctor(self, e_rhs))
+                Self::wrap(gs, N::GeometricProduct(MulSet::empty(), self, e_rhs))
             }
         }
         )*
     };
 }
-gaexpr_binary_ops! {
-    Add add Addition "Multivector addition",
-    Mul mul GeometricProduct "Geometric product",
-    BitXor bitxor GeometricProduct "Outer product",
-    BitAnd bitand GeometricProduct "Inner product",
-    Shl shl GeometricProduct "Left contraction",
-    Shr shr GeometricProduct "Right contraction"
+
+gaexpr_products! {
+    Mul mul "Geometric product",
+    BitXor bitxor "Outer product",
+    BitAnd bitand "Inner product",
+    Shl shl "Left contraction",
+    Shr shr "Right contraction"
 }
 
 impl<T> std::ops::Neg for GaExpr<T> {
@@ -297,13 +338,13 @@ impl<T> GaExpr<T> {
     /// Recursively propagate wanted grades downwards so as to evaluate for each
     /// sub-expression only the grades that are necessary to compute the whole
     /// [`GaExpr`]
-    pub fn minimize_grades(self) -> ReadyGaExpr<T> {
+    pub fn minimize_grades(self, alg: &impl MetricAlgebra) -> ReadyGaExpr<T> {
         // The process is split in two because sub-expressions may be used at
         // several places in the AST. First we collect all the requirements for
         // expressions throughout the whole tree, as hints to be applied later:
         self.propagate_grade_hints(&self.rc.borrow_gs());
         // Then for each node we apply the hints collected previously:
-        self.apply_grade_hints();
+        self.apply_grade_hints(alg);
         // GaExpr<T> and ReadyGaExpr<T> have the exact same memory
         // representation, therefore this is safe:
         unsafe { std::mem::transmute(self) }
@@ -328,7 +369,7 @@ impl<T> GaExpr<T> {
                 e1.propagate_grade_hints(wanted);
                 e2.propagate_grade_hints(wanted);
             }
-            N::GeometricProduct(e1, e2) => {
+            N::GeometricProduct(_, e1, e2) => {
                 // Find in e1 and e2 which grades, once multiplied, will affect
                 // the grades in `wanted`
                 let (e1_wanted, e2_wanted) =
@@ -341,7 +382,7 @@ impl<T> GaExpr<T> {
         }
     }
 
-    fn apply_grade_hints(&self) {
+    fn apply_grade_hints(&self, alg: &impl MetricAlgebra) {
         self.rc.apply_hints();
         match &self.rc.ast_node {
             N::GradedObj(_) => {}
@@ -352,11 +393,41 @@ impl<T> GaExpr<T> {
             | N::ScalarUnaryOp(_, e)
             | N::Exponential(e)
             | N::Logarithm(e) => {
-                e.apply_grade_hints();
+                e.apply_grade_hints(alg);
             }
-            N::Addition(e1, e2) | N::GeometricProduct(e1, e2) => {
-                e1.apply_grade_hints();
-                e2.apply_grade_hints();
+            N::Addition(e1, e2) => {
+                e1.apply_grade_hints(alg);
+                e2.apply_grade_hints(alg);
+            }
+            N::GeometricProduct(mul_set, e1, e2) => {
+                e1.apply_grade_hints(alg);
+                e2.apply_grade_hints(alg);
+                // Now that the grades at play for this geometric product are
+                // fully resolved, we can construct the set of operations that
+                // will be needed to perform it:
+                let mul_ops = self
+                    .rc
+                    .borrow_gs()
+                    .iter_contributions_to_gp(&e1.rc.borrow_gs(), &e2.rc.borrow_gs())
+                    .flat_map(|(_, k1, k2)| {
+                        iter_basis_blades_for_grade(alg, k1).flat_map(move |bb1| {
+                            iter_basis_blades_for_grade(alg, k2).map(move |bb2| {
+                                let (bb_res, mul_coef) = alg.ortho_basis_blades_gp(&bb1, &bb2);
+                                let left_coord = alg.basis_blade_to_coord(&bb1);
+                                let right_coord = alg.basis_blade_to_coord(&bb2);
+                                let res_coord = alg.basis_blade_to_coord(&bb_res);
+                                MulOp {
+                                    left_coord,
+                                    right_coord,
+                                    mul_coef,
+                                    res_coord,
+                                }
+                            })
+                        })
+                    })
+                    .filter(|op| self.rc.borrow_gs().contains(op.res_coord.grade))
+                    .collect::<Vec<_>>();
+                mul_set.rc.replace(Some(mul_ops));
             }
         }
     }
