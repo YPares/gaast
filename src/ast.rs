@@ -226,7 +226,7 @@ impl<T> GaExpr<T> {
     }
 
     /// Return the expressions for the base vectors in a vector space of dim `D`
-    pub fn base_vecs<const D: usize>() -> [Self; D]
+    pub fn basis_vectors<const D: usize>() -> [Self; D]
     where
         T: GradedDataMut,
     {

@@ -40,12 +40,8 @@ impl<T: GradedData> ReadyGaExpr<T> {
         }
     }
 
-    fn add_to_res<R>(
-        &self,
-        alg: &impl MetricAlgebra,
-        cache: &mut Cache<R>,
-        res: &mut R,
-    ) where
+    fn add_to_res<R>(&self, alg: &impl MetricAlgebra, cache: &mut Cache<R>, res: &mut R)
+    where
         R: GradedDataMut + Clone,
     {
         if self.grade_set().is_empty() {
@@ -128,10 +124,10 @@ impl<T: GradedData> ReadyGaExpr<T> {
         {
             for (i_left, c_left) in mv_left.grade_slice(k_left).iter().enumerate() {
                 for (i_right, c_right) in mv_right.grade_slice(k_right).iter().enumerate() {
-                    let bb_left = alg.basis_blade_from_indexes(k_left, i_left);
-                    let bb_right = alg.basis_blade_from_indexes(k_right, i_right);
+                    let bb_left = alg.indexes_to_basis_blade(k_left, i_left);
+                    let bb_right = alg.indexes_to_basis_blade(k_right, i_right);
                     let (bb_res, coef) = alg.ortho_basis_blades_gp(&bb_left, &bb_right);
-                    let (k_res, i_res) = alg.indexes_from_basis_blade(&bb_res);
+                    let (k_res, i_res) = alg.basis_blade_to_indexes(&bb_res);
                     if self.grade_set().contains(k_res) {
                         mv_res.grade_slice_mut(k_res)[i_res] += c_left * c_right * coef;
                     }
@@ -143,56 +139,42 @@ impl<T: GradedData> ReadyGaExpr<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{grade_map_mv, graded::GradeMapMV, GaExpr};
-    use rstest::*;
-
-    type E = GaExpr<GradeMapMV>;
+    use crate::{algebra::OrthoEuclidN, grade_map_mv, graded::GradeMapMV, GaExpr};
 
     macro_rules! expr_eq {
-        ($alg:ident, $a:expr, $b:expr) => {{
-            let a = $a;
-            let b = $b;
-            assert_eq!(a.minimize_grades().eval::<GradeMapMV>(&$alg), b);
-        }};
+        ($alg:ident, $a:expr, $b:expr) => {
+            assert_eq!($a.minimize_grades().eval::<GradeMapMV>(&$alg), $b);
+        };
     }
 
-    type Ega3 = [f64; 3];
-    #[fixture]
-    fn ega3() -> Ega3 {
-        [1.0, 1.0, 1.0]
+    type E = GaExpr<GradeMapMV>;
+    const EGA3: OrthoEuclidN = OrthoEuclidN(3);
+    const PGA2: [f64; 3] = [0.0, 1.0, 1.0];
+
+    #[test]
+    fn vecs_to_bivec() {
+        let [e1, e2, _] = E::basis_vectors();
+        expr_eq!(EGA3, e1 ^ e2, grade_map_mv!(2 => 1 0 0));
     }
 
-    type Pga2 = [f64; 3];
-    #[fixture]
-    fn pga2() -> Pga2 {
-        [0.0, 1.0, 1.0]
+    #[test]
+    fn vecs_to_trivec() {
+        let [e1, e2, e3] = E::basis_vectors();
+        expr_eq!(EGA3, e2 ^ e1 ^ e3, grade_map_mv!(3 => -1));
     }
 
-    #[rstest]
-    fn vecs_to_bivec(ega3: Ega3) {
-        let [e1, e2, _] = E::base_vecs();
-        let ex = e2 ^ e1;
-        expr_eq!(ega3, ex, grade_map_mv!(2 => -1 0 0));
+    #[test]
+    fn vec_norm() {
+        let [e0, e1, e2] = E::basis_vectors();
+        expr_eq!(PGA2, (e0 - 2 * e1 + e2).norm_sq(), grade_map_mv!(0 => 5));
     }
 
-    #[rstest]
-    fn vecs_to_trivec(ega3: Ega3) {
-        let [e1, e2, e3] = E::base_vecs();
-        expr_eq!(ega3, e2 ^ e1 ^ e3, grade_map_mv!(3 => -1));
-    }
-
-    #[rstest]
-    fn vec_norm(pga2: Pga2) {
-        let [e0, e1, e2] = E::base_vecs();
-        expr_eq!(pga2, (e0 - 2 * e1 + e2).norm_sq(), grade_map_mv!(0 => 5));
-    }
-
-    #[rstest]
-    fn projection(ega3: Ega3) {
-        let [e1, e2, e3] = E::base_vecs();
+    #[test]
+    fn projection() {
+        let [e1, e2, e3] = E::basis_vectors();
         let v = e1.clone() + e2.clone();
         let bv = 4 * e1 ^ e3;
         // project v onto bv:
-        expr_eq!(ega3, (v & bv.clone()) & bv.inv(), grade_map_mv!(1 => 1 0 0));
+        expr_eq!(EGA3, (v & bv.clone()) & bv.inv(), grade_map_mv!(1 => 1 0 0));
     }
 }

@@ -6,7 +6,6 @@
 
 use super::grade_set::Grade;
 use bitvec::prelude::*;
-use num_bigint::BigUint;
 
 // # TYPES & TRAITS //
 
@@ -21,12 +20,6 @@ pub trait Algebra {
         self.vec_space_dim() + 1
     }
 
-    /// The number of basis blades in this algebra. Corresponds to the max
-    /// number of f64 components of a general multivector in this algebra
-    fn algebraic_dim(&self) -> BigUint {
-        BigUint::from(2u32).pow(self.vec_space_dim() as u32)
-    }
-
     /// The number of basis blades of grade `k` (ie. the number of components of
     /// `k`-vectors in this algebra)
     fn grade_dim(&self, k: Grade) -> usize {
@@ -35,8 +28,8 @@ pub trait Algebra {
 
     /// Given a grade and an index in a slice storing that grade's components,
     /// find the associated [`BasisBlade`]
-    fn basis_blade_from_indexes(&self, k: Grade, pos_in_grade: usize) -> BasisBlade {
-        BasisBlade(idx_to_bitfield_permut(
+    fn indexes_to_basis_blade(&self, k: Grade, pos_in_grade: usize) -> BasisBlade {
+        BasisBlade(index_to_bitfield_permut(
             self.vec_space_dim(),
             k,
             pos_in_grade,
@@ -45,21 +38,26 @@ pub trait Algebra {
 
     /// Does the reverse: for some [`BasisBlade`], find its grade and its index
     /// in the slice of components for that grade
-    fn indexes_from_basis_blade<'a>(&'a self, BasisBlade(b): &'a BasisBlade) -> (Grade, usize) {
+    fn basis_blade_to_indexes(&self, BasisBlade(b): &BasisBlade) -> (Grade, usize) {
         let k = b.count_ones() as usize;
-        let pos = bitfield_permut_to_idx(self.vec_space_dim(), k, b);
+        let pos = bitfield_permut_to_index(self.vec_space_dim(), k, b);
         (k, pos)
     }
 }
 
 /// A metric geometric algebra over some vector space
 pub trait MetricAlgebra: Algebra {
-    /// Give the dot product of two base vectors (identified by index)
+    /// Give the dot product of two base vectors (identified by index). This
+    /// function must always be symmetric (`base_vec_dot(u,v) ==
+    /// base_vec_dot(v,u)`).
+    /// 
+    /// Evaluated on each pair of base vectors, this gives the (symmetric) Gram
+    /// matrix of the metric
     fn base_vec_dot(&self, v1: usize, v2: usize) -> f64;
 
-    /// The geometric product of two basis blades restricted to cases where all
-    /// basis vectors are orthogonal (diagonal metric). TODO: Diagonalize the
-    /// Gram matrix when metric isn't diagonal.
+    /// The geometric product of two basis blades, _restricted to cases where
+    /// all basis vectors are orthogonal (diagonal Gram matrix)._ TODO:
+    /// Diagonalize the Gram matrix in other cases
     fn ortho_basis_blades_gp(
         &self,
         BasisBlade(b1): &BasisBlade,
@@ -76,19 +74,34 @@ pub trait MetricAlgebra: Algebra {
 /// A basis blade in some algebra, of the form `1`, `eX`, `eX^eY`, `eX^eY^eZ`,
 /// etc.
 ///
-/// Basis blade representation follows the convention described in _Dorst, L.,
-/// Fontijne, D., & Mann, S. (2010). Geometric algebra for computer science: an
-/// object-oriented approach to geometry. Elsevier._ Each bit represents a base
-/// vector of the underlying vector space, so eg.:
-/// - 0000000000000 is the scalar unique base blade (`1`)
-/// - 1000000000000 is the first vector (e1)
-/// - 0100000000000 is the second vector (e2)
-/// - 1110000000000 is the trivector e1 ^ e2 ^ e3, etc.
+/// Internally, each basis blade is represented with a bitfield, and base
+/// vectors are assumed to be orthogonal, so their outer and geometric products
+/// are equal, and computable with a simple bitwise XOR. This follows the
+/// recommendations of _Dorst, L., Fontijne, D., & Mann, S. (2010). Geometric
+/// algebra for computer science: an object-oriented approach to geometry.
+/// Elsevier_ (section 19.1, page 512 in the revised edition). Each bit
+/// represents a basis _vector_ of the underlying vector space, so eg.:
+/// 
+/// - 0000000000000 : a blade with no basis vector. This is therefore the scalar
+///   unique basis blade (`1`)
+/// - 1000000000000 : first basis vector (`e1`)
+/// - 0100000000000 : second basis vector (`e2`)
+/// - 1110000000000 : "first" basis trivector (`e1 ^ e2 ^ e3`)
+/// - 1011011000000 : the basis 5-vector `e1 ^ e3 ^ e4 ^ e6 ^ e7`
+/// - etc.
+/// 
+/// The length of each bitfield is therefore just the dimension of the
+/// underlying vector space.
+/// 
+/// The order of the vectors in each basis blade always follows the "natural"
+/// order of the basis vectors it is composed of. That means eg. that the
+/// trivector `e5 ^ e2 ^ e8` will be represented by the `e2 ^ e5 ^ e8` basis
+/// trivector associated to a `-1` component.
 ///
-/// The length of each bitfield is the dim of the underlying vector
-/// space. Note that bitvec considers the first bit to be the leftmost
-/// (accesses are done like a vector, from left to right, regardless of
-/// the underlying storage being MSB or LSB)
+/// There is just a variation compared to the book mentioned above: we start
+/// from the leftmost bit (ie. the MSB represents `e1`), because gaast uses
+/// variable-length bitvecs to represent basis blades, which behave more like
+/// arrays than unsigned integers.
 #[derive(Clone)]
 pub struct BasisBlade(BitVec);
 
@@ -126,8 +139,8 @@ impl<const D: usize> MetricAlgebra for [f64; D] {
 /// A [`MetricAlgebra`] over a euclidean vector space of some dimension N. Thus
 /// we have N orthogonal base vectors, each one squaring to 1
 ///
-/// Therefore, `OrthoEuclidN(X)` represents the exact same algebra as `[1;
-/// X]`, only their representation (and therefore, size) in memory is different
+/// Therefore, `OrthoEuclidN(N)` represents the exact same algebra as `[1.0;
+/// N]`, only their representation (and therefore, size) in memory is different
 #[derive(Debug)]
 pub struct OrthoEuclidN(
     /// Dimension N of the underlying vector space
@@ -177,7 +190,7 @@ pub(crate) fn canonical_reordering_sign(mut b1: BitVec, b2: &BitVec) -> f64 {
 /// See also
 /// <https://graphics.stanford.edu/%7Eseander/bithacks.html#NextBitPermutation>
 /// about a way to enumerate all bitfields in lexicographic order
-pub(crate) fn idx_to_bitfield_permut(n: usize, mut k: usize, mut i: usize) -> BitVec {
+pub(crate) fn index_to_bitfield_permut(n: usize, mut k: usize, mut i: usize) -> BitVec {
     let mut res = bitvec![0; n];
     for b in 1..=n {
         let z = n_choose_k(n - b, k);
@@ -192,7 +205,7 @@ pub(crate) fn idx_to_bitfield_permut(n: usize, mut k: usize, mut i: usize) -> Bi
 
 /// Does the reverse of [`idx_to_bitfield_permut`]: given a bitfield, finds its
 /// index (starting at `0`) in the lexicographic permutation suite
-pub(crate) fn bitfield_permut_to_idx(n: usize, mut k: usize, v: &BitVec) -> usize {
+pub(crate) fn bitfield_permut_to_index(n: usize, mut k: usize, v: &BitVec) -> usize {
     let mut res = 0;
     for b in 1..=n {
         let z = n_choose_k(n - b, k);
@@ -241,7 +254,7 @@ mod tests {
         let indexes = (0..n_choose_k(10, 5)).collect::<Vec<_>>();
         let indexes2 = indexes
             .iter()
-            .map(|i| bitfield_permut_to_idx(10, 5, &idx_to_bitfield_permut(10, 5, *i)))
+            .map(|i| bitfield_permut_to_index(10, 5, &index_to_bitfield_permut(10, 5, *i)))
             .collect::<Vec<_>>();
         assert_eq!(indexes, indexes2);
     }
@@ -249,11 +262,11 @@ mod tests {
     #[test]
     fn bitfield_permut_idx_roundtrip() {
         let bitfields = (0..n_choose_k(9, 4))
-            .map(|i| idx_to_bitfield_permut(9, 4, i))
+            .map(|i| index_to_bitfield_permut(9, 4, i))
             .collect::<Vec<_>>();
         let bitfields2 = bitfields
             .iter()
-            .map(|b| idx_to_bitfield_permut(9, 4, bitfield_permut_to_idx(9, 4, b)))
+            .map(|b| index_to_bitfield_permut(9, 4, bitfield_permut_to_index(9, 4, b)))
             .collect::<Vec<_>>();
         assert_eq!(bitfields, bitfields2);
     }
