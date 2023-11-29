@@ -18,7 +18,7 @@ pub enum ScalarUnaryOp {
 /// The abstract syntax tree nodes representing geometric algebra primitive
 /// operations. `T` is some raw multivector type, and `E` is a boxed type itself
 /// containing an `AstNode`.
-#[derive(Hash, Debug)]
+#[derive(Debug)]
 pub enum AstNode<E, T> {
     /// Use of a raw multivector which exposes which grades it contains. To do
     /// so, most operations on `Ast` require `T: [Graded]`

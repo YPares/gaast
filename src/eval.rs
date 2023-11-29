@@ -122,19 +122,29 @@ impl<T: GradedData> ReadyGaExpr<T> {
             .grade_set()
             .iter_contributions_to_gp(&e_left.grade_set(), &e_right.grade_set())
         {
-            for (i_left, c_left) in mv_left.grade_slice(k_left).iter().enumerate() {
-                for (i_right, c_right) in mv_right.grade_slice(k_right).iter().enumerate() {
-                    let bb_left = alg.indexes_to_basis_blade(k_left, i_left);
-                    let bb_right = alg.indexes_to_basis_blade(k_right, i_right);
+            for (bb_left, comp_left) in iter_basis_blade_comps(alg, &mv_left, k_left) {
+                for (bb_right, comp_right) in iter_basis_blade_comps(alg, &mv_right, k_right) {
                     let (bb_res, coef) = alg.ortho_basis_blades_gp(&bb_left, &bb_right);
-                    let (k_res, i_res) = alg.basis_blade_to_indexes(&bb_res);
-                    if self.grade_set().contains(k_res) {
-                        mv_res.grade_slice_mut(k_res)[i_res] += c_left * c_right * coef;
+                    let coord_res = alg.basis_blade_to_coord(&bb_res);
+                    if self.grade_set().contains(coord_res.grade) {
+                        mv_res.grade_slice_mut(coord_res.grade)[coord_res.index] +=
+                            comp_left * comp_right * coef;
                     }
                 }
             }
         }
     }
+}
+
+fn iter_basis_blade_comps<'a>(
+    alg: &'a impl MetricAlgebra,
+    mv: &'a impl GradedData,
+    k: usize,
+) -> impl Iterator<Item = (BasisBlade, f64)> + 'a {
+    mv.grade_slice(k)
+        .iter()
+        .enumerate()
+        .map(move |(i, x)| (alg.coord_to_basis_blade(&Coord { grade: k, index: i }), *x))
 }
 
 #[cfg(test)]

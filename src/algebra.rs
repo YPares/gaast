@@ -28,20 +28,16 @@ pub trait Algebra {
 
     /// Given a grade and an index in a slice storing that grade's components,
     /// find the associated [`BasisBlade`]
-    fn indexes_to_basis_blade(&self, k: Grade, pos_in_grade: usize) -> BasisBlade {
-        BasisBlade(index_to_bitfield_permut(
-            self.vec_space_dim(),
-            k,
-            pos_in_grade,
-        ))
+    fn coord_to_basis_blade(&self, Coord { grade, index }: &Coord) -> BasisBlade {
+        BasisBlade(index_to_bitfield_permut(self.vec_space_dim(), *grade, *index))
     }
 
     /// Does the reverse: for some [`BasisBlade`], find its grade and its index
     /// in the slice of components for that grade
-    fn basis_blade_to_indexes(&self, BasisBlade(b): &BasisBlade) -> (Grade, usize) {
-        let k = b.count_ones() as usize;
-        let pos = bitfield_permut_to_index(self.vec_space_dim(), k, b);
-        (k, pos)
+    fn basis_blade_to_coord(&self, BasisBlade(b): &BasisBlade) -> Coord {
+        let grade = b.count_ones() as usize;
+        let index = bitfield_permut_to_index(self.vec_space_dim(), grade, b);
+        Coord { grade, index }
     }
 }
 
@@ -50,7 +46,7 @@ pub trait MetricAlgebra: Algebra {
     /// Give the dot product of two base vectors (identified by index). This
     /// function must always be symmetric (`base_vec_dot(u,v) ==
     /// base_vec_dot(v,u)`).
-    /// 
+    ///
     /// Evaluated on each pair of base vectors, this gives the (symmetric) Gram
     /// matrix of the metric
     fn base_vec_dot(&self, v1: usize, v2: usize) -> f64;
@@ -71,6 +67,20 @@ pub trait MetricAlgebra: Algebra {
     }
 }
 
+pub struct Coord {
+    pub grade: Grade,
+    pub index: usize,
+}
+
+impl Coord {
+    pub fn from_tuple((grade, index): (Grade, usize)) -> Self {
+        Self { grade, index }
+    }
+    pub fn to_tuple(self) -> (Grade, usize) {
+        (self.grade, self.index)
+    }
+}
+
 /// A basis blade in some algebra, of the form `1`, `eX`, `eX^eY`, `eX^eY^eZ`,
 /// etc.
 ///
@@ -81,7 +91,7 @@ pub trait MetricAlgebra: Algebra {
 /// algebra for computer science: an object-oriented approach to geometry.
 /// Elsevier_ (section 19.1, page 512 in the revised edition). Each bit
 /// represents a basis _vector_ of the underlying vector space, so eg.:
-/// 
+///
 /// - 0000000000000 : a blade with no basis vector. This is therefore the scalar
 ///   unique basis blade (`1`)
 /// - 1000000000000 : first basis vector (`e1`)
@@ -89,10 +99,10 @@ pub trait MetricAlgebra: Algebra {
 /// - 1110000000000 : "first" basis trivector (`e1 ^ e2 ^ e3`)
 /// - 1011011000000 : the basis 5-vector `e1 ^ e3 ^ e4 ^ e6 ^ e7`
 /// - etc.
-/// 
+///
 /// The length of each bitfield is therefore just the dimension of the
 /// underlying vector space.
-/// 
+///
 /// The order of the vectors in each basis blade always follows the "natural"
 /// order of the basis vectors it is composed of. That means eg. that the
 /// trivector `e5 ^ e2 ^ e8` will be represented by the `e2 ^ e5 ^ e8` basis
@@ -177,7 +187,7 @@ pub(crate) fn canonical_reordering_sign(mut b1: BitVec, b2: &BitVec) -> f64 {
             break;
         }
     }
-    (1 - (sum % 2) * 2) as f64 // -1 if sum odd, +1 if even
+    (1 - (sum % 2) * 2) as f64 // -1 if sum is odd, +1 if even
 }
 
 /// Directly computes the nth term of the lexicographic permutation suite of
