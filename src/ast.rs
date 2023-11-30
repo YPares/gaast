@@ -3,33 +3,13 @@
 use crate::algebra::{iter_basis_blades_of_grade, MetricAlgebra};
 use crate::graded::GradedDataMut;
 
-use super::algebra::Coord;
+use super::algebra::Component;
 use super::{grade_set::*, graded::Graded};
 use std::{
     cell::{OnceCell, Ref, RefCell},
     rc::Rc,
 };
 use AstNode as N;
-
-#[derive(Hash, Debug)]
-pub enum ScalarUnaryOp {
-    Inversion,
-    SquareRoot,
-}
-
-/// A component-wise multiplication to perform on input data, and where to store
-/// the result in output data
-#[derive(Debug)]
-pub struct IndividualCoordMul {
-    /// The coordinate to read in the left operand
-    pub left_coord: Coord,
-    /// The coordinate to read in the right operand
-    pub right_coord: Coord,
-    /// The coordinate to update in the result
-    pub result_coord: Coord,
-    /// The coefficient to apply to the product of the two coordinates
-    pub mul_coef: f64,
-}
 
 /// The abstract syntax tree nodes representing geometric algebra primitive
 /// operations. `T` is some raw multivector type, and `E` is a boxed type itself
@@ -41,9 +21,10 @@ pub enum AstNode<E, T> {
     GradedObj(T),
     /// Multivector addition
     Addition(E, E),
-    /// Geometric product. The individual coord-to-coord multiplications to
-    /// perform are stored here
-    GeometricProduct(OnceCell<Vec<IndividualCoordMul>>, E, E),
+    /// Geometric product. The actual individual component-to-component
+    /// multiplications to perform are initially empty, and then updated during
+    /// the AST preparation phase
+    GeometricProduct(OnceCell<Vec<IndividualCompMul>>, E, E),
     /// Multivector negation
     Negation(E),
     /// Multivector exponentiation. See [`GaExpr::exp`] for limitations
@@ -59,6 +40,26 @@ pub enum AstNode<E, T> {
     GradeInvolution(E),
     /// Operate only on the scalar part
     ScalarUnaryOp(ScalarUnaryOp, E),
+}
+
+/// A component-to-component multiplication to perform on input data, and where
+/// to store the result in output data
+#[derive(Debug)]
+pub struct IndividualCompMul {
+    /// The component to read in the left operand
+    pub left_comp: Component,
+    /// The component to read in the right operand
+    pub right_comp: Component,
+    /// The component to update in the result
+    pub result_comp: Component,
+    /// The coefficient to apply to the product of the two input components
+    pub coeff: f64,
+}
+
+#[derive(Hash, Debug)]
+pub enum ScalarUnaryOp {
+    Inversion,
+    SquareRoot,
 }
 
 /// Assign a [`GradeSet`] to some [`AstNode`]. This [`GradeSet`] can be modified
@@ -105,7 +106,7 @@ impl<T, E: Into<GaExpr<T>>> std::ops::Add<E> for GaExpr<T> {
     /// Multivector addition
     fn add(self, rhs: E) -> Self::Output {
         let e_rhs = rhs.into();
-        let gs = self.rc.grade_set.borrow().clone() + e_rhs.rc.grade_set.borrow().clone();
+        let gs = self.grade_set().clone() + e_rhs.grade_set().clone();
         Self::new(gs, N::Addition(self, e_rhs))
     }
 }
@@ -119,7 +120,7 @@ macro_rules! gaexpr_products {
             #[doc=$doc]
             fn $method(self, rhs: E) -> Self::Output {
                 let e_rhs = rhs.into();
-                let gs = self.rc.grade_set.borrow().clone().$method(e_rhs.rc.grade_set.borrow().clone());
+                let gs = self.grade_set().clone().$method(e_rhs.grade_set().clone());
                 Self::new(gs, N::GeometricProduct(OnceCell::new(), self, e_rhs))
             }
         }
@@ -138,7 +139,7 @@ gaexpr_products! {
 impl<T> std::ops::Neg for GaExpr<T> {
     type Output = Self;
     fn neg(self) -> Self {
-        let gs = self.rc.grade_set.borrow().clone();
+        let gs = self.grade_set().clone();
         Self::new(gs, N::Negation(self))
     }
 }
@@ -200,13 +201,21 @@ macro_rules! gaexpr_unary_ops {
         $(
             #[doc=$doc]
             pub fn $fn_name(self) -> Self {
-                let gs = self.rc.grade_set.borrow().clone().$grade_op();
+                let gs = self.grade_set().clone().$grade_op();
                 Self::new(
                     gs,
                     N::$ctor(self),
                 )
             }
         )*
+    }
+}
+
+/// Get the [`GradeSet`] inferred for this expression
+impl<T> Graded for GaExpr<T> {
+    type RefToGradeSet<'a> = Ref<'a, GradeSet> where T: 'a;
+    fn grade_set(&self) -> Self::RefToGradeSet<'_> {
+        self.rc.grade_set.borrow()
     }
 }
 
@@ -248,12 +257,13 @@ impl<T> GaExpr<T> {
         GaExpr::exp(GaExpr::log(self) * p)
     }
 
+    // Square root
     pub fn sqrt(self) -> Self
     where
         T: GradedDataMut,
     {
-        if self.rc.grade_set.borrow().is_just(0) {
-            let gs = self.rc.grade_set.borrow().clone();
+        if self.grade_set().is_just(0) {
+            let gs = self.grade_set().clone();
             Self::new(gs, N::ScalarUnaryOp(ScalarUnaryOp::SquareRoot, self))
         } else {
             self.pow(0.5)
@@ -267,12 +277,12 @@ impl<T> GaExpr<T> {
 
     /// Grade projection: select specific grades.
     pub fn gselect(self, f: impl FnOnce(&GradeSet) -> GradeSet) -> Self {
-        let wanted = f(&self.rc.grade_set.borrow());
-        let gs = self.rc.grade_set.borrow().clone().intersection(wanted);
+        let wanted = f(&self.grade_set());
+        let gs = self.grade_set().clone().intersection(wanted);
         Self::new(gs.clone(), N::GradeProjection(self, gs))
     }
 
-    /// Scalar product. Just a shortcut for `(self.rev() * rhs).prj(0)`
+    /// Scalar product. Just a shortcut for `(self.rev() * rhs).g(0)`
     pub fn scal(self, rhs: Self) -> Self {
         (self.rev() * rhs).g(0)
     }
@@ -282,11 +292,13 @@ impl<T> GaExpr<T> {
         self.rev().ginvol()
     }
 
-    /// Inverse. Just a shortcut for `self.clone().rev() * self.norm_sq().inv()`
+    /// Inverse. In the case of a multivector, is just a shortcut for
+    /// `self.clone().rev() * self.norm_sq().inv()`. If self is just a scalar,
+    /// it will compute its regular inverse
     pub fn inv(self) -> Self {
-        if self.rc.grade_set.borrow().is_just(0) {
+        if self.grade_set().is_just(0) {
             // Regular scalar inversion
-            let gs = self.rc.grade_set.borrow().clone();
+            let gs = self.grade_set().clone();
             Self::new(gs, N::ScalarUnaryOp(ScalarUnaryOp::Inversion, self))
         } else {
             self.clone().rev() * self.norm_sq().inv()
@@ -310,7 +322,7 @@ impl<T> GaExpr<T> {
         // The process is split in two because sub-expressions may be used at
         // several places in the AST. First we collect all the requirements for
         // expressions throughout the whole tree, as hints to be applied later:
-        self.propagate_grade_hints(&self.rc.grade_set.borrow());
+        self.propagate_grade_hints(&self.grade_set());
         // Then for each node we apply the hints collected previously, and store
         // what is needed from the algebra at each node for evaluation:
         self.apply_grade_hints_and_algebra(alg);
@@ -347,8 +359,8 @@ impl<T> GaExpr<T> {
             N::GeometricProduct(_, e1, e2) => {
                 // Find in e1 and e2 which grades, once multiplied, will affect
                 // the grades in `wanted`
-                let (e1_wanted, e2_wanted) = wanted
-                    .parts_contributing_to_gp(&e1.rc.grade_set.borrow(), &e2.rc.grade_set.borrow());
+                let (e1_wanted, e2_wanted) =
+                    wanted.parts_contributing_to_gp(&e1.grade_set(), &e2.grade_set());
                 e1.propagate_grade_hints(&e1_wanted);
                 e2.propagate_grade_hints(&e2_wanted);
             }
@@ -392,41 +404,43 @@ impl<T> GaExpr<T> {
                 e_left.apply_grade_hints_and_algebra(alg);
                 e_right.apply_grade_hints_and_algebra(alg);
                 // Now that the grades at play for this geometric product are
-                // fully resolved, we can construct the set of operations that
-                // will be needed to perform it:
-                let mul_ops = self
-                    .rc
-                    .grade_set
-                    .borrow()
-                    .iter_contribs_to_gp(
-                        &e_left.rc.grade_set.borrow(),
-                        &e_right.rc.grade_set.borrow(),
-                    )
-                    .flat_map(|(_, k_left, k_right)| {
-                        iter_basis_blades_of_grade(alg, k_left).flat_map(move |bb_left| {
-                            iter_basis_blades_of_grade(alg, k_right).filter_map(move |bb_right| {
-                                let (bb_res, mul_coef) =
-                                    alg.ortho_basis_blades_gp(&bb_left, &bb_right);
-                                let result_coord = alg.basis_blade_to_coord(&bb_res);
-                                if self.rc.grade_set.borrow().contains(result_coord.grade) {
-                                    Some(IndividualCoordMul {
-                                        left_coord: alg.basis_blade_to_coord(&bb_left),
-                                        right_coord: alg.basis_blade_to_coord(&bb_right),
-                                        result_coord,
-                                        mul_coef,
-                                    })
-                                } else {
-                                    None
-                                }
-                            })
-                        })
-                    })
-                    .collect();
+                // fully resolved, we can construct the set of
+                // component-to-component multiplications that will be needed to
+                // perform it:
                 individual_muls_cell
-                    .set(mul_ops)
+                    .set(self.get_individual_comp_muls(alg, e_left, e_right))
                     .expect("IndividualCoordMul cell has already been set");
             }
         }
+    }
+
+    fn get_individual_comp_muls(
+        &self,
+        alg: &impl MetricAlgebra,
+        e_left: &GaExpr<T>,
+        e_right: &GaExpr<T>,
+    ) -> Vec<IndividualCompMul> {
+        self.grade_set()
+            .iter_contribs_to_gp(&e_left.grade_set(), &e_right.grade_set())
+            .flat_map(|(_, k_left, k_right)| {
+                iter_basis_blades_of_grade(alg, k_left).flat_map(move |bb_left| {
+                    iter_basis_blades_of_grade(alg, k_right).filter_map(move |bb_right| {
+                        let (bb_res, coeff) = alg.ortho_basis_blades_gp(&bb_left, &bb_right);
+                        let result_comp = alg.basis_blade_to_component(&bb_res);
+                        if self.grade_set().contains(result_comp.grade) {
+                            Some(IndividualCompMul {
+                                left_comp: alg.basis_blade_to_component(&bb_left),
+                                right_comp: alg.basis_blade_to_component(&bb_right),
+                                result_comp,
+                                coeff,
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                })
+            })
+            .collect()
     }
 }
 

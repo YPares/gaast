@@ -30,7 +30,7 @@ pub trait Algebra {
 
     /// Given a grade and an index in a slice storing that grade's components,
     /// find the associated [`BasisBlade`]
-    fn coord_to_basis_blade(&self, Coord { grade, index }: &Coord) -> BasisBlade {
+    fn component_to_basis_blade(&self, Component { grade, index }: &Component) -> BasisBlade {
         BasisBlade(index_to_bitfield_permut(
             self.vec_space_dim(),
             *grade,
@@ -40,10 +40,10 @@ pub trait Algebra {
 
     /// Does the reverse: for some [`BasisBlade`], find its grade and its index
     /// in the slice of components for that grade
-    fn basis_blade_to_coord(&self, BasisBlade(b): &BasisBlade) -> Coord {
+    fn basis_blade_to_component(&self, BasisBlade(b): &BasisBlade) -> Component {
         let grade = b.count_ones() as usize;
         let index = bitfield_permut_to_index(self.vec_space_dim(), grade, b);
-        Coord { grade, index }
+        Component { grade, index }
     }
 }
 
@@ -55,7 +55,8 @@ pub fn iter_basis_blades_of_grade(
 ) -> impl Iterator<Item = BasisBlade> + '_ {
     // TODO: reimplement that using
     // https://graphics.stanford.edu/%7Eseander/bithacks.html#NextBitPermutation
-    (0..alg.grade_dim(grade)).map(move |index| alg.coord_to_basis_blade(&Coord { grade, index }))
+    (0..alg.grade_dim(grade))
+        .map(move |index| alg.component_to_basis_blade(&Component { grade, index }))
 }
 
 /// A metric geometric algebra over some vector space
@@ -84,13 +85,14 @@ pub trait MetricAlgebra: Algebra {
     }
 }
 
+/// The position of a component (an item in a slice) in a graded object
 #[derive(Debug)]
-pub struct Coord {
+pub struct Component {
     pub grade: Grade,
     pub index: usize,
 }
 
-impl Coord {
+impl Component {
     pub fn from_tuple((grade, index): (Grade, usize)) -> Self {
         Self { grade, index }
     }
