@@ -59,12 +59,12 @@ impl<T: GradedData> ReadyGaExpr<T> {
                     res.negate_grade(k);
                 }
             }
-            N::GeometricProduct(individual_muls_cell, e_left, e_right) => {
+            N::GeometricProduct(comp_muls_cell, e_left, e_right) => {
                 let mv_left: R = e_left.eval_with_cache(cache);
                 let mv_right: R = e_right.eval_with_cache(cache);
-                for mul in individual_muls_cell
+                for mul in comp_muls_cell
                     .get()
-                    .expect("IndividualCoordMul cell has not been set")
+                    .expect("IndividualCompMul cell has not been set")
                 {
                     let val_left = mv_left.grade_slice(mul.left_comp.grade)[mul.left_comp.index];
                     let val_right =
