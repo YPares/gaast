@@ -4,6 +4,8 @@
 //! A [`MetricAlgebra`] additionally tells how these base vectors multiply under
 //! the dot product
 
+use crate::GradeSet;
+
 use super::grade_set::Grade;
 use bitvec::prelude::*;
 
@@ -15,9 +17,9 @@ pub trait Algebra {
     /// The dimensionality of the underlying vector space
     fn vec_space_dim(&self) -> usize;
 
-    /// Number of grades in this algebra
-    fn num_grades(&self) -> usize {
-        self.vec_space_dim() + 1
+    /// The maximal [`GradeSet`] available in this algebra
+    fn full_grade_set(&self) -> GradeSet {
+        (0..=self.vec_space_dim()).fold(GradeSet::empty(), |acc, k| acc.add_grade(k))
     }
 
     /// The number of basis blades of grade `k` (ie. the number of components of
@@ -51,6 +53,8 @@ pub fn iter_basis_blades_of_grade(
     alg: &impl Algebra,
     grade: Grade,
 ) -> impl Iterator<Item = BasisBlade> + '_ {
+    // TODO: reimplement that using
+    // https://graphics.stanford.edu/%7Eseander/bithacks.html#NextBitPermutation
     (0..alg.grade_dim(grade)).map(move |index| alg.coord_to_basis_blade(&Coord { grade, index }))
 }
 

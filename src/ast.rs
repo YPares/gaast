@@ -90,7 +90,7 @@ pub fn mv<T: Graded>(x: T) -> GaExpr<T> {
     GaExpr::new(gs, AstNode::GradedObj(x))
 }
 
-/// [`GaExpr`] uses [`Rc`] internally, so you can safely clone it extensively
+/// [`GaExpr`] uses [`Rc`] internally, so you can clone it extensively
 impl<T> Clone for GaExpr<T> {
     fn clone(&self) -> Self {
         Self {
@@ -360,14 +360,16 @@ impl<T> GaExpr<T> {
     fn apply_grade_hints_and_algebra(&self, alg: &impl MetricAlgebra) {
         if let Err(_) = self.rc.vec_space_dim.set(alg.vec_space_dim()) {
             // Grade hints and algebra have already been applied for this node
-            // (and its subnodes)
+            // (and its subnodes), because it is referred to in at least one
+            // other part of the AST
             return;
         }
         match self.rc.grade_set_hints.borrow().as_ref() {
-            Some(hints) => self
-                .rc
-                .grade_set
-                .replace_with(|gs| gs.clone().intersection(hints.clone())),
+            Some(hints) => self.rc.grade_set.replace_with(|gs| {
+                gs.clone()
+                    .intersection(hints.clone())
+                    .intersection(alg.full_grade_set())
+            }),
             None => panic!("Hints not set for this node"),
         };
         self.rc.grade_set_hints.replace(None);
@@ -419,7 +421,7 @@ impl<T> GaExpr<T> {
                             })
                         })
                     })
-                    .collect::<Vec<_>>();
+                    .collect();
                 individual_muls_cell
                     .set(mul_ops)
                     .expect("IndividualCoordMul cell has already been set");
