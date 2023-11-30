@@ -62,7 +62,10 @@ impl<T: GradedData> ReadyGaExpr<T> {
             N::GeometricProduct(individual_muls_cell, e_left, e_right) => {
                 let mv_left: R = e_left.eval_with_cache(cache);
                 let mv_right: R = e_right.eval_with_cache(cache);
-                for op in individual_muls_cell.get().expect("IndividualCoordMul cell has not been set") {
+                for op in individual_muls_cell
+                    .get()
+                    .expect("IndividualCoordMul cell has not been set")
+                {
                     let x = mv_left.grade_slice(op.left_coord.grade)[op.left_coord.index];
                     let y = mv_right.grade_slice(op.right_coord.grade)[op.right_coord.index];
                     let z = &mut res.grade_slice_mut(op.result_coord.grade)[op.result_coord.index];
@@ -93,18 +96,7 @@ impl<T: GradedData> ReadyGaExpr<T> {
                     ScalarUnaryOp::SquareRoot => s[0].sqrt(),
                 }
             }
-            N::GradeProjection(e, _) => {
-                if *self.grade_set() == *e.grade_set() {
-                    // Projection is a no-op: `res` is already what the
-                    // underlying expr `e` expects
-                    e.add_to_res(cache, res);
-                } else {
-                    // Projection actually filters out stuff: `res` misses some
-                    // grades to be readily used by the underlying expr
-                    // evaluator. We need to allocate and copy
-                    res.add_grades_from(&e.eval::<R>(), &self.grade_set());
-                }
-            }
+            N::GradeProjection(e, _) => e.add_to_res(cache, res),
             N::Exponential(_e) => todo!(),
             N::Logarithm(_e) => todo!(),
         }
