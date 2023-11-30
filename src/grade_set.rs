@@ -230,7 +230,7 @@ impl GradeSet {
     /// grade_in_left, grade_in_right)
     ///
     /// GREEDY O(N^2) IMPLEMENTATION FOR NOW
-    pub fn iter_contributions_to_gp<'a>(
+    pub fn iter_contribs_to_gp<'a>(
         &'a self,
         left: &'a Self,
         right: &'a Self,
@@ -247,12 +247,12 @@ impl GradeSet {
         })
     }
 
-    /// Uses [`Self::iter_contributions_to_gp`] to collect
+    /// Uses [`Self::iter_contribs_to_gp`] to collect
     /// (contributing_grades_in_left, contributing_grades_in_right)
     pub fn parts_contributing_to_gp(&self, left: &Self, right: &Self) -> (Self, Self) {
         let mut filtered_left = GradeSet::empty();
         let mut filtered_right = GradeSet::empty();
-        for (_, k_left, k_right) in self.iter_contributions_to_gp(left, right) {
+        for (_, k_left, k_right) in self.iter_contribs_to_gp(left, right) {
             filtered_left = filtered_left.add_grade(k_left);
             filtered_right = filtered_right.add_grade(k_right);
         }

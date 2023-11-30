@@ -20,13 +20,13 @@ Computing GA expressions with `gaast` is done fully at runtime, in 3 phases:
   that data), and then we go up the AST, inferring the grades of the result
   of each AST node (ie. each intermediate operation), and therefore of the
   full expression.
-- 2: **Grade minimisation**. This step does _downwards grade inference_.
-  It's the same process, but in reverse: knowing the grade(s) that our
+- 2: **AST preparation**. This step does _downwards grade inference_.
+  It's the same process than phase 1, but in reverse: knowing the grade(s) that our
   entire expression evaluates to (notably if this expression uses some grade
   projections), we propagate these wanted grades downwards so as to update
   each AST node with only the grades that will need to be read or computed
   in the end.
-- 3: **Evaluation**. Given the annotated AST resulting from the two previous
+- 3: **AST evaluation**. Given the annotated AST resulting from the two previous
   phases, allocates, reads and computes only what is needed to get the final
   multivector to which the full GaExpr evaluates to.
 

@@ -45,7 +45,9 @@ pub trait Algebra {
     }
 }
 
-pub fn iter_basis_blades_for_grade(
+/// Given an algebra and a grade, yield all the basis blades of that grade in
+/// this algebra
+pub fn iter_basis_blades_of_grade(
     alg: &impl Algebra,
     grade: Grade,
 ) -> impl Iterator<Item = BasisBlade> + '_ {

@@ -1,12 +1,12 @@
 //! Represent a GA expression using an abstract syntax tree
 
-use crate::algebra::{iter_basis_blades_for_grade, MetricAlgebra};
+use crate::algebra::{iter_basis_blades_of_grade, MetricAlgebra};
 use crate::graded::GradedDataMut;
 
 use super::algebra::Coord;
 use super::{grade_set::*, graded::Graded};
 use std::{
-    cell::{Ref, RefCell},
+    cell::{OnceCell, Ref, RefCell},
     rc::Rc,
 };
 use AstNode as N;
@@ -20,25 +20,15 @@ pub enum ScalarUnaryOp {
 /// A component-wise multiplication to perform on input data, and where to store
 /// the result in output data
 #[derive(Debug)]
-pub struct MulOp {
+pub struct IndividualCoordMul {
+    /// The coordinate to read in the left operand
     pub left_coord: Coord,
+    /// The coordinate to read in the right operand
     pub right_coord: Coord,
+    /// The coordinate to update in the result
+    pub result_coord: Coord,
+    /// The coefficient to apply to the product of the two coordinates
     pub mul_coef: f64,
-    pub res_coord: Coord,
-}
-
-/// The coord-to-coord multiplications to perform
-#[derive(Debug)]
-pub struct MulSet {
-    pub rc: RefCell<Option<Vec<MulOp>>>,
-}
-
-impl MulSet {
-    pub fn empty() -> Self {
-        MulSet {
-            rc: RefCell::new(None),
-        }
-    }
 }
 
 /// The abstract syntax tree nodes representing geometric algebra primitive
@@ -51,8 +41,9 @@ pub enum AstNode<E, T> {
     GradedObj(T),
     /// Multivector addition
     Addition(E, E),
-    /// Geometric product
-    GeometricProduct(MulSet, E, E),
+    /// Geometric product. The individual coord-to-coord multiplications to
+    /// perform are stored here
+    GeometricProduct(OnceCell<Vec<IndividualCoordMul>>, E, E),
     /// Multivector negation
     Negation(E),
     /// Multivector exponentiation. See [`GaExpr::exp`] for limitations
@@ -75,35 +66,10 @@ pub enum AstNode<E, T> {
 /// ie. which grades its use sites actually need
 #[derive(Debug)]
 struct GradedNode<E, T> {
-    grade_set_cell: RefCell<GradeSet>,
+    grade_set: RefCell<GradeSet>,
     grade_set_hints: RefCell<Option<GradeSet>>,
+    vec_space_dim: OnceCell<usize>,
     ast_node: AstNode<E, T>,
-}
-
-impl<E, T> GradedNode<E, T> {
-    fn borrow_gs(&self) -> Ref<'_, GradeSet> {
-        self.grade_set_cell.borrow()
-    }
-
-    fn add_hint(&self, new: GradeSet) {
-        self.grade_set_hints
-            .replace_with(|mb_hints| match mb_hints {
-                Some(old) => Some(old.clone() + new),
-                None => Some(new),
-            });
-    }
-
-    /// Important: apply_hints is idempotent
-    fn apply_hints(&self) {
-        match self.grade_set_hints.borrow().as_ref() {
-            Some(hints) => {
-                self.grade_set_cell
-                    .replace_with(|g| g.clone().intersection(hints.clone()));
-            }
-            None => {}
-        };
-        self.grade_set_hints.replace(None);
-    }
 }
 
 /// An AST representing primitive GA operations, which allows to infer the
@@ -121,7 +87,7 @@ pub struct GaExpr<T> {
 /// value (multivector)
 pub fn mv<T: Graded>(x: T) -> GaExpr<T> {
     let gs = x.grade_set().clone();
-    GaExpr::wrap(gs, AstNode::GradedObj(x))
+    GaExpr::new(gs, AstNode::GradedObj(x))
 }
 
 /// [`GaExpr`] uses [`Rc`] internally, so you can safely clone it extensively
@@ -136,15 +102,11 @@ impl<T> Clone for GaExpr<T> {
 /// Multivector addition
 impl<T, E: Into<GaExpr<T>>> std::ops::Add<E> for GaExpr<T> {
     type Output = Self;
-    #[doc = "Multivector addition"]
+    /// Multivector addition
     fn add(self, rhs: E) -> Self::Output {
         let e_rhs = rhs.into();
-        let gs = self
-            .rc
-            .borrow_gs()
-            .clone()
-            .add(e_rhs.rc.borrow_gs().clone());
-        Self::wrap(gs, N::Addition(self, e_rhs))
+        let gs = self.rc.grade_set.borrow().clone() + e_rhs.rc.grade_set.borrow().clone();
+        Self::new(gs, N::Addition(self, e_rhs))
     }
 }
 
@@ -157,8 +119,8 @@ macro_rules! gaexpr_products {
             #[doc=$doc]
             fn $method(self, rhs: E) -> Self::Output {
                 let e_rhs = rhs.into();
-                let gs = self.rc.borrow_gs().clone().$method(e_rhs.rc.borrow_gs().clone());
-                Self::wrap(gs, N::GeometricProduct(MulSet::empty(), self, e_rhs))
+                let gs = self.rc.grade_set.borrow().clone().$method(e_rhs.rc.grade_set.borrow().clone());
+                Self::new(gs, N::GeometricProduct(OnceCell::new(), self, e_rhs))
             }
         }
         )*
@@ -176,8 +138,8 @@ gaexpr_products! {
 impl<T> std::ops::Neg for GaExpr<T> {
     type Output = Self;
     fn neg(self) -> Self {
-        let gs = self.rc.borrow_gs().clone();
-        Self::wrap(gs, N::Negation(self))
+        let gs = self.rc.grade_set.borrow().clone();
+        Self::new(gs, N::Negation(self))
     }
 }
 
@@ -238,8 +200,8 @@ macro_rules! gaexpr_unary_ops {
         $(
             #[doc=$doc]
             pub fn $fn_name(self) -> Self {
-                let gs = self.rc.borrow_gs().clone().$grade_op();
-                Self::wrap(
+                let gs = self.rc.grade_set.borrow().clone().$grade_op();
+                Self::new(
                     gs,
                     N::$ctor(self),
                 )
@@ -249,12 +211,13 @@ macro_rules! gaexpr_unary_ops {
 }
 
 impl<T> GaExpr<T> {
-    fn wrap(gs: GradeSet, ast: AstNode<Self, T>) -> Self {
+    fn new(gs: GradeSet, ast_node: AstNode<Self, T>) -> Self {
         Self {
             rc: Rc::new(GradedNode {
-                grade_set_cell: RefCell::new(gs),
+                grade_set: RefCell::new(gs),
                 grade_set_hints: RefCell::new(None),
-                ast_node: ast,
+                vec_space_dim: OnceCell::new(),
+                ast_node,
             }),
         }
     }
@@ -289,9 +252,9 @@ impl<T> GaExpr<T> {
     where
         T: GradedDataMut,
     {
-        if self.rc.borrow_gs().is_just(0) {
-            let gs = self.rc.borrow_gs().clone();
-            Self::wrap(gs, N::ScalarUnaryOp(ScalarUnaryOp::SquareRoot, self))
+        if self.rc.grade_set.borrow().is_just(0) {
+            let gs = self.rc.grade_set.borrow().clone();
+            Self::new(gs, N::ScalarUnaryOp(ScalarUnaryOp::SquareRoot, self))
         } else {
             self.pow(0.5)
         }
@@ -304,9 +267,9 @@ impl<T> GaExpr<T> {
 
     /// Grade projection: select specific grades.
     pub fn gselect(self, f: impl FnOnce(&GradeSet) -> GradeSet) -> Self {
-        let wanted = f(&self.rc.borrow_gs());
-        let gs = self.rc.borrow_gs().clone().intersection(wanted);
-        Self::wrap(gs.clone(), N::GradeProjection(self, gs))
+        let wanted = f(&self.rc.grade_set.borrow());
+        let gs = self.rc.grade_set.borrow().clone().intersection(wanted);
+        Self::new(gs.clone(), N::GradeProjection(self, gs))
     }
 
     /// Scalar product. Just a shortcut for `(self.rev() * rhs).prj(0)`
@@ -321,10 +284,10 @@ impl<T> GaExpr<T> {
 
     /// Inverse. Just a shortcut for `self.clone().rev() * self.norm_sq().inv()`
     pub fn inv(self) -> Self {
-        if self.rc.borrow_gs().is_just(0) {
+        if self.rc.grade_set.borrow().is_just(0) {
             // Regular scalar inversion
-            let gs = self.rc.borrow_gs().clone();
-            Self::wrap(gs, N::ScalarUnaryOp(ScalarUnaryOp::Inversion, self))
+            let gs = self.rc.grade_set.borrow().clone();
+            Self::new(gs, N::ScalarUnaryOp(ScalarUnaryOp::Inversion, self))
         } else {
             self.clone().rev() * self.norm_sq().inv()
         }
@@ -335,16 +298,22 @@ impl<T> GaExpr<T> {
         self.clone().scal(self)
     }
 
-    /// Recursively propagate wanted grades downwards so as to evaluate for each
-    /// sub-expression only the grades that are necessary to compute the whole
-    /// [`GaExpr`]
-    pub fn minimize_grades(self, alg: &impl MetricAlgebra) -> ReadyGaExpr<T> {
+    /// Tells which algebra this [`GaExpr`] is using, and recursively propagates
+    /// wanted grades downwards so as to evaluate for each sub-expression only
+    /// the grades that are necessary to compute the whole [`GaExpr`]
+    ///
+    /// The given [`MetricAlgebra`] must make sense with respect to the input
+    /// values contained in the [`GaExpr`], in terms of possible grades
+    /// contained in those input values, and of number of components for each
+    /// grade
+    pub fn prepare(self, alg: &impl MetricAlgebra) -> ReadyGaExpr<T> {
         // The process is split in two because sub-expressions may be used at
         // several places in the AST. First we collect all the requirements for
         // expressions throughout the whole tree, as hints to be applied later:
-        self.propagate_grade_hints(&self.rc.borrow_gs());
-        // Then for each node we apply the hints collected previously:
-        self.apply_grade_hints(alg);
+        self.propagate_grade_hints(&self.rc.grade_set.borrow());
+        // Then for each node we apply the hints collected previously, and store
+        // what is needed from the algebra at each node for evaluation:
+        self.apply_grade_hints_and_algebra(alg);
         // GaExpr<T> and ReadyGaExpr<T> have the exact same memory
         // representation, therefore this is safe:
         unsafe { std::mem::transmute(self) }
@@ -352,9 +321,15 @@ impl<T> GaExpr<T> {
 
     fn propagate_grade_hints(&self, wanted: &GradeSet) {
         // Here, we know the resulting grade of the operation represented by the
-        // top node of the AST, and we "undo" it to find the grades wanted in
-        // its operands
-        self.rc.add_hint(wanted.clone());
+        // top node of the AST, and we recursively "undo" the AST it to find the
+        // grades wanted in each subexpression (the minimal set of grades they
+        // should evaluate to given the final result we want)
+        self.rc
+            .grade_set_hints
+            .replace_with(|mb_hints| match mb_hints {
+                Some(old) => Some(old.clone() + wanted.clone()),
+                None => Some(wanted.clone()),
+            });
         match &self.rc.ast_node {
             N::GradedObj(_) => {}
             N::GradeProjection(e, _)
@@ -372,8 +347,8 @@ impl<T> GaExpr<T> {
             N::GeometricProduct(_, e1, e2) => {
                 // Find in e1 and e2 which grades, once multiplied, will affect
                 // the grades in `wanted`
-                let (e1_wanted, e2_wanted) =
-                    wanted.parts_contributing_to_gp(&e1.rc.borrow_gs(), &e2.rc.borrow_gs());
+                let (e1_wanted, e2_wanted) = wanted
+                    .parts_contributing_to_gp(&e1.rc.grade_set.borrow(), &e2.rc.grade_set.borrow());
                 e1.propagate_grade_hints(&e1_wanted);
                 e2.propagate_grade_hints(&e2_wanted);
             }
@@ -382,8 +357,20 @@ impl<T> GaExpr<T> {
         }
     }
 
-    fn apply_grade_hints(&self, alg: &impl MetricAlgebra) {
-        self.rc.apply_hints();
+    fn apply_grade_hints_and_algebra(&self, alg: &impl MetricAlgebra) {
+        if let Err(_) = self.rc.vec_space_dim.set(alg.vec_space_dim()) {
+            // Grade hints and algebra have already been applied for this node
+            // (and its subnodes)
+            return;
+        }
+        match self.rc.grade_set_hints.borrow().as_ref() {
+            Some(hints) => self
+                .rc
+                .grade_set
+                .replace_with(|gs| gs.clone().intersection(hints.clone())),
+            None => panic!("Hints not set for this node"),
+        };
+        self.rc.grade_set_hints.replace(None);
         match &self.rc.ast_node {
             N::GradedObj(_) => {}
             N::Negation(e)
@@ -393,41 +380,49 @@ impl<T> GaExpr<T> {
             | N::ScalarUnaryOp(_, e)
             | N::Exponential(e)
             | N::Logarithm(e) => {
-                e.apply_grade_hints(alg);
+                e.apply_grade_hints_and_algebra(alg);
             }
-            N::Addition(e1, e2) => {
-                e1.apply_grade_hints(alg);
-                e2.apply_grade_hints(alg);
+            N::Addition(e_left, e_right) => {
+                e_left.apply_grade_hints_and_algebra(alg);
+                e_right.apply_grade_hints_and_algebra(alg);
             }
-            N::GeometricProduct(mul_set, e1, e2) => {
-                e1.apply_grade_hints(alg);
-                e2.apply_grade_hints(alg);
+            N::GeometricProduct(individual_muls_cell, e_left, e_right) => {
+                e_left.apply_grade_hints_and_algebra(alg);
+                e_right.apply_grade_hints_and_algebra(alg);
                 // Now that the grades at play for this geometric product are
                 // fully resolved, we can construct the set of operations that
                 // will be needed to perform it:
                 let mul_ops = self
                     .rc
-                    .borrow_gs()
-                    .iter_contributions_to_gp(&e1.rc.borrow_gs(), &e2.rc.borrow_gs())
-                    .flat_map(|(_, k1, k2)| {
-                        iter_basis_blades_for_grade(alg, k1).flat_map(move |bb1| {
-                            iter_basis_blades_for_grade(alg, k2).map(move |bb2| {
-                                let (bb_res, mul_coef) = alg.ortho_basis_blades_gp(&bb1, &bb2);
-                                let left_coord = alg.basis_blade_to_coord(&bb1);
-                                let right_coord = alg.basis_blade_to_coord(&bb2);
-                                let res_coord = alg.basis_blade_to_coord(&bb_res);
-                                MulOp {
-                                    left_coord,
-                                    right_coord,
-                                    mul_coef,
-                                    res_coord,
+                    .grade_set
+                    .borrow()
+                    .iter_contribs_to_gp(
+                        &e_left.rc.grade_set.borrow(),
+                        &e_right.rc.grade_set.borrow(),
+                    )
+                    .flat_map(|(_, k_left, k_right)| {
+                        iter_basis_blades_of_grade(alg, k_left).flat_map(move |bb_left| {
+                            iter_basis_blades_of_grade(alg, k_right).filter_map(move |bb_right| {
+                                let (bb_res, mul_coef) =
+                                    alg.ortho_basis_blades_gp(&bb_left, &bb_right);
+                                let result_coord = alg.basis_blade_to_coord(&bb_res);
+                                if self.rc.grade_set.borrow().contains(result_coord.grade) {
+                                    Some(IndividualCoordMul {
+                                        left_coord: alg.basis_blade_to_coord(&bb_left),
+                                        right_coord: alg.basis_blade_to_coord(&bb_right),
+                                        result_coord,
+                                        mul_coef,
+                                    })
+                                } else {
+                                    None
                                 }
                             })
                         })
                     })
-                    .filter(|op| self.rc.borrow_gs().contains(op.res_coord.grade))
                     .collect::<Vec<_>>();
-                mul_set.rc.replace(Some(mul_ops));
+                individual_muls_cell
+                    .set(mul_ops)
+                    .expect("IndividualCoordMul cell has already been set");
             }
         }
     }
@@ -465,12 +460,21 @@ impl<T> ReadyGaExpr<T> {
     pub fn ast_node(&self) -> &AstNode<ReadyGaExpr<T>, T> {
         &self.rc.ast_node
     }
+
+    /// The underlying vector space of the algebra used by this expression
+    pub fn vec_space_dim(&self) -> usize {
+        *self
+            .rc
+            .vec_space_dim
+            .get()
+            .expect("vec_space_dim cell not set for this node")
+    }
 }
 
 /// Get the [`GradeSet`] inferred for this expression
 impl<T> Graded for ReadyGaExpr<T> {
     type RefToGradeSet<'a> = Ref<'a, GradeSet> where T: 'a;
     fn grade_set(&self) -> Self::RefToGradeSet<'_> {
-        self.rc.borrow_gs()
+        self.rc.grade_set.borrow()
     }
 }
