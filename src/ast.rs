@@ -396,7 +396,11 @@ impl<T> GaExpr<T> {
         // should evaluate to given the final result we want)
         self.rc
             .minimal_grade_set
-            .replace_with(|old| old.clone() + wanted.clone());
+            .replace_with(|gs| gs.clone() + wanted.clone());
+        // If a node is refered to in several parts of the AST, all the
+        // grade requirements will be combined. So that node can be
+        // evaluated just once, and it will return everything needed
+        // throughout the AST
         match &self.rc.ast_node {
             N::GradedObj(_) => {}
             N::GradeProjection(e)
@@ -450,7 +454,12 @@ impl<T> GaExpr<T> {
             return;
         }
         self.restrict_minimal_grade_set(alg.full_grade_set());
-        self.restrict_minimal_grade_set(self.rc.maximal_grade_set.clone());
+        assert!(
+            self.rc
+                .maximal_grade_set
+                .includes(self.minimal_grade_set().clone()),
+            "Inferred minimal grade set contains grades not available in maximal grade set"
+        );
         match &self.rc.ast_node {
             N::GradedObj(_) => {}
             N::Negation(e)
@@ -460,14 +469,6 @@ impl<T> GaExpr<T> {
             | N::ScalarUnaryOp(_, e) => {
                 e.rec_apply_algebra(alg);
                 self.restrict_minimal_grade_set(e.minimal_grade_set().clone());
-            }
-            N::Exponential(e) => {
-                e.rec_apply_algebra(alg);
-                self.restrict_minimal_grade_set(e.minimal_grade_set().clone().exp())
-            }
-            N::Logarithm(e) => {
-                e.rec_apply_algebra(alg);
-                self.restrict_minimal_grade_set(e.minimal_grade_set().clone().log())
             }
             N::Addition(left, right) => {
                 left.rec_apply_algebra(alg);
@@ -510,6 +511,14 @@ impl<T> GaExpr<T> {
                             .collect(),
                     )
                     .expect("IndividualCompMul cell has already been set");
+            }
+            N::Exponential(e) => {
+                e.rec_apply_algebra(alg);
+                self.restrict_minimal_grade_set(e.minimal_grade_set().clone().exp())
+            }
+            N::Logarithm(e) => {
+                e.rec_apply_algebra(alg);
+                self.restrict_minimal_grade_set(e.minimal_grade_set().clone().log())
             }
         }
     }

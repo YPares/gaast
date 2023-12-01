@@ -5,6 +5,8 @@
 use super::{algebra::n_choose_k, grade_set::*};
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 
+/// Just a newtype wrapper around any owned type, to provide a Deref
+/// implementation that targets that type
 pub struct Owned<T>(pub T);
 
 impl<T> std::ops::Deref for Owned<T> {

@@ -146,7 +146,7 @@ impl GradeSet {
     }
 
     /// Whether this GradeSet fully contains another
-    pub fn includes(self, other: GradeSet) -> bool {
+    pub fn includes(&self, other: GradeSet) -> bool {
         (self.bv.clone() | other.bv) == self.bv
     }
 
