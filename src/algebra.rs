@@ -86,7 +86,7 @@ pub trait MetricAlgebra: Algebra {
 }
 
 /// The position of a component (an item in a slice) in a graded object
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Component {
     pub grade: Grade,
     pub index: usize,

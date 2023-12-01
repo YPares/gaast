@@ -205,9 +205,9 @@ impl GradeSet {
     pub fn iter_cartesian_product<'a>(
         &'a self,
         other: &'a Self,
-    ) -> impl Iterator<Item = (Grade, Grade)> + Clone + 'a {
+    ) -> impl Iterator<Item = (i64, i64)> + Clone + 'a {
         self.iter()
-            .flat_map(move |kl| other.iter().map(move |kr| (kl, kr)))
+            .flat_map(move |kl| other.iter().map(move |kr| (kl as i64, kr as i64)))
     }
 
     // Apply a function to each pair of the cartesian product of 2 grade sets
@@ -217,42 +217,50 @@ impl GradeSet {
         mut f: impl FnMut(i64, i64) -> GradeSet,
     ) -> GradeSet {
         self.iter_cartesian_product(&other)
-            .map(|(k1, k2)| f(k1 as i64, k2 as i64))
-            .reduce(|a, b| a + b)
-            .unwrap_or(GradeSet::empty())
+            .map(|(k1, k2)| f(k1, k2))
+            .fold(GradeSet::empty(), |acc, x| acc + x)
     }
 
-    /// Using `self` as a geometric product result, yields all the pairs of
-    /// grades in `left` and `right` that will, when multiplied, contribute to
-    /// at least one of the grades contained in self.
+    /// Using `self` as some product result, yields all the pairs of grades in
+    /// `left` and `right` that will, when multiplied, contribute to at least
+    /// one of the grades contained in self.
     ///
-    /// Each element yielded is of the form (resulting_part_of_self,
-    /// grade_in_left, grade_in_right)
+    /// Each element yielded is of the form (grade_in_left, grade_in_right,
+    /// grades_in_self_contributed_to)
     ///
-    /// GREEDY O(N^2) IMPLEMENTATION FOR NOW
-    pub fn iter_contribs_to_gp<'a>(
+    /// The `grade_selection_fn` param defines which product is used: for each
+    /// individual k-vector to g-vector product in inputs, it must return the
+    /// grades we want out of this product
+    ///
+    /// Greedy O(N^2) implementation
+    pub fn iter_contribs_to_product<'a>(
         &'a self,
+        grade_selection_fn: impl Fn(i64, i64) -> GradeSet + 'a,
         left: &'a Self,
         right: &'a Self,
-    ) -> impl Iterator<Item = (GradeSet, Grade, Grade)> + Clone + 'a {
-        left.iter_cartesian_product(right).filter_map(|(kl, kr)| {
-            let contribs = self
-                .clone()
-                .intersection(Self::from_usize(kl) * Self::from_usize(kr));
-            if !contribs.is_empty() {
-                Some((contribs, kl, kr))
-            } else {
-                None
-            }
-        })
+    ) -> impl Iterator<Item = (Grade, Grade, GradeSet)> + 'a {
+        left.iter_cartesian_product(right)
+            .filter_map(move |(kl, kr)| {
+                let contribs = self.clone().intersection(grade_selection_fn(kl, kr));
+                if !contribs.is_empty() {
+                    Some((kl as usize, kr as usize, contribs))
+                } else {
+                    None
+                }
+            })
     }
 
-    /// Uses [`Self::iter_contribs_to_gp`] to collect
+    /// Uses [`Self::iter_contribs_to_product`] to collect
     /// (contributing_grades_in_left, contributing_grades_in_right)
-    pub fn parts_contributing_to_gp(&self, left: &Self, right: &Self) -> (Self, Self) {
+    pub fn parts_contributing_to_product<'a>(
+        &'a self,
+        grade_selection_fn: impl Fn(i64, i64) -> GradeSet + 'a,
+        left: &'a Self,
+        right: &'a Self,
+    ) -> (Self, Self) {
         let mut filtered_left = GradeSet::empty();
         let mut filtered_right = GradeSet::empty();
-        for (_, k_left, k_right) in self.iter_contribs_to_gp(left, right) {
+        for (k_left, k_right, _) in self.iter_contribs_to_product(grade_selection_fn, left, right) {
             filtered_left = filtered_left.add_grade(k_left);
             filtered_right = filtered_right.add_grade(k_right);
         }
@@ -281,44 +289,6 @@ impl std::ops::Add for GradeSet {
     fn add(self, rhs: Self) -> Self::Output {
         let (small, big) = sort_by_len(self.bv, rhs.bv);
         GradeSet { bv: big | small }
-    }
-}
-
-/// Outer product
-impl std::ops::BitXor for GradeSet {
-    type Output = Self;
-    fn bitxor(self, rhs: Self) -> Self::Output {
-        self.sum_map_cartesian_product(&rhs, |k1, k2| GradeSet::single(k1 + k2))
-    }
-}
-
-/// Inner product
-impl std::ops::BitAnd for GradeSet {
-    type Output = Self;
-    fn bitand(self, rhs: Self) -> Self::Output {
-        self.sum_map_cartesian_product(&rhs, |k1, k2| {
-            if k1 == 0 || k2 == 0 {
-                GradeSet::empty()
-            } else {
-                GradeSet::single((k1 - k2).abs())
-            }
-        })
-    }
-}
-
-/// Left contraction
-impl std::ops::Shl for GradeSet {
-    type Output = Self;
-    fn shl(self, rhs: Self) -> Self::Output {
-        self.sum_map_cartesian_product(&rhs, |k1, k2| GradeSet::single(k2 - k1))
-    }
-}
-
-/// Right contraction
-impl std::ops::Shr for GradeSet {
-    type Output = Self;
-    fn shr(self, rhs: Self) -> Self::Output {
-        self.sum_map_cartesian_product(&rhs, |k1, k2| GradeSet::single(k1 - k2))
     }
 }
 
@@ -381,11 +351,17 @@ mod tests {
         empty_not_single_graded: E().is_single() => false,
         empty_intersection_is_empty: S(0).intersection(S(1)).is_empty() => true,
         iter_grades: (S(1) + S(22) + S(10)).iter().collect::<Vec<_>>() => vec![1,10,22],
-        parts_contributing_to_gp:
-          S(0).parts_contributing_to_gp( &(S(1) + S(0) + S(2) + S(10))
-                                        , &(S(0) + S(2) + S(6)) )
-          => (S(0) + S(2), S(0) + S(2)),
-        outer: (S(1) + S(4)) ^ (S(1) + S(5)) => S(2) + S(6) + S(5) + S(9),
-        inner: (S(1) + S(4)) & (S(0) + S(1) + S(5)) => S(0) + S(4) + S(3) + S(1)
+        parts_contributing_to_geom_prod:
+            S(0).parts_contributing_to_product(
+                |k1, k2| GradeSet::single(k1) * GradeSet::single(k2),
+                &(S(1) + S(0) + S(2) + S(10)),
+                &(S(0) + S(2) + S(6))
+            ) => (S(0) + S(2), S(0) + S(2)),
+        parts_contributing_to_outer_prod:
+            S(4).parts_contributing_to_product(
+                |k1, k2| GradeSet::single(k1 + k2),
+                &(S(1) + S(0) + S(2) + S(10)),
+                &(S(0) + S(2) + S(3))
+            ) => (S(1) + S(2), S(2) + S(3))
     }
 }

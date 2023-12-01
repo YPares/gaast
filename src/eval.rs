@@ -7,7 +7,7 @@ use AstNode as N;
 
 type Cache<R> = HashMap<ExprId, R>;
 
-impl<T: GradedData> ReadyGaExpr<T> {
+impl<T: GradedData> SpecializedGaExpr<T> {
     /// Evaluates a [`GaExpr`]
     pub fn eval<R>(&self) -> R
     where
@@ -49,9 +49,9 @@ impl<T: GradedData> ReadyGaExpr<T> {
             N::GradedObj(input) => {
                 res.add_grades_from(input, &self.grade_set());
             }
-            N::Addition(e_left, e_right) => {
-                e_left.add_to_res(cache, res);
-                e_right.add_to_res(cache, res);
+            N::Addition(left_expr, right_expr) => {
+                left_expr.add_to_res(cache, res);
+                right_expr.add_to_res(cache, res);
             }
             N::Negation(e) => {
                 e.add_to_res(cache, res);
@@ -59,9 +59,14 @@ impl<T: GradedData> ReadyGaExpr<T> {
                     res.negate_grade(k);
                 }
             }
-            N::GeometricProduct(comp_muls_cell, e_left, e_right) => {
-                let mv_left: R = e_left.eval_with_cache(cache);
-                let mv_right: R = e_right.eval_with_cache(cache);
+            N::Product(Product {
+                comp_muls_cell,
+                left_expr,
+                right_expr,
+                ..
+            }) => {
+                let mv_left: R = left_expr.eval_with_cache(cache);
+                let mv_right: R = right_expr.eval_with_cache(cache);
                 for mul in comp_muls_cell
                     .get()
                     .expect("IndividualCompMul cell has not been set")
@@ -98,7 +103,7 @@ impl<T: GradedData> ReadyGaExpr<T> {
                     ScalarUnaryOp::SquareRoot => s[0].sqrt(),
                 }
             }
-            N::GradeProjection(e, _) => e.add_to_res(cache, res),
+            N::GradeProjection(e) => e.add_to_res(cache, res),
             N::Exponential(_e) => todo!(),
             N::Logarithm(_e) => todo!(),
         }
@@ -111,7 +116,7 @@ mod tests {
 
     macro_rules! expr_eq {
         ($alg:ident, $a:expr, $b:expr) => {
-            assert_eq!($a.prepare(&$alg).eval::<GradeMapMV>(), $b);
+            assert_eq!($a.specialize(&$alg).eval::<GradeMapMV>(), $b);
         };
     }
 

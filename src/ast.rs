@@ -5,6 +5,7 @@ use crate::graded::GradedDataMut;
 
 use super::algebra::Component;
 use super::{grade_set::*, graded::Graded};
+use std::fmt::Debug;
 use std::{
     cell::{OnceCell, Ref, RefCell},
     rc::Rc,
@@ -21,25 +22,33 @@ pub enum AstNode<E, T> {
     GradedObj(T),
     /// Multivector addition
     Addition(E, E),
-    /// Geometric product. The actual individual component-to-component
-    /// multiplications to perform are initially empty, and then updated during
-    /// the AST preparation phase
-    GeometricProduct(OnceCell<Vec<IndividualCompMul>>, E, E),
+    /// Some product
+    Product(Product<E>),
     /// Multivector negation
     Negation(E),
     /// Multivector exponentiation. See [`GaExpr::exp`] for limitations
     Exponential(E),
     /// Multivector natural logarithm. See [`GaExpr::log`] for limitations
     Logarithm(E),
-    /// Grade projection (or "grade extraction"). The grade(s) to extract are
-    /// stored here only for error-reporting reasons
-    GradeProjection(E, GradeSet),
+    /// Grade projection (or "grade extraction")
+    GradeProjection(E),
     /// Reverse (or "dagger")
     Reverse(E),
     /// Grade involution (or main involution)
     GradeInvolution(E),
     /// Operate only on the scalar part
     ScalarUnaryOp(ScalarUnaryOp, E),
+}
+
+/// Represents some product to perform. The actual individual
+/// component-to-component multiplications to perform are initially empty, and
+/// then updated during the AST specialization phase
+#[derive(Debug)]
+pub struct Product<E> {
+    pub comp_muls_cell: OnceCell<Vec<IndividualCompMul>>,
+    grades_to_select: KVecsProductGradeProj,
+    pub left_expr: E,
+    pub right_expr: E,
 }
 
 /// A component-to-component multiplication to perform on input data, and where
@@ -56,6 +65,14 @@ pub struct IndividualCompMul {
     pub coeff: f64,
 }
 
+struct KVecsProductGradeProj(Box<dyn Fn(i64, i64) -> GradeSet>);
+
+impl Debug for KVecsProductGradeProj {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<ProductGradeSelectionFn>")
+    }
+}
+
 #[derive(Hash, Debug)]
 pub enum ScalarUnaryOp {
     Inversion,
@@ -70,10 +87,10 @@ struct GradedNode<E, T> {
     /// The grade set inferred at AST construction (inferred from the maximal
     /// grade sets of this node's subexpressions)
     maximal_grade_set: GradeSet,
-    /// Starting at empty, is updated at AST preparation, to finally reflect on
-    /// the minimal set of grades to allocate/compute at evaluation
+    /// Starting at empty, is updated during AST specialization, to finally
+    /// reflect on the minimal set of grades to allocate/compute at evaluation
     minimal_grade_set: RefCell<GradeSet>,
-    /// Starting at empty, is set at AST preparation given the metric
+    /// Starting at empty, is set during AST specialization given the algebra
     vec_space_dim: OnceCell<usize>,
     /// This node
     ast_node: AstNode<E, T>,
@@ -118,16 +135,14 @@ impl<T, E: Into<GaExpr<T>>> std::ops::Add<E> for GaExpr<T> {
 }
 
 macro_rules! gaexpr_products {
-    ($($trait:ident $method:ident $doc:literal),*) => {
+    ($($doc:literal $trait:ident $method:ident ($fn:expr)),*) => {
         $(
         #[doc=$doc]
         impl<T, E: Into<GaExpr<T>>> std::ops::$trait<E> for GaExpr<T> {
             type Output = Self;
             #[doc=$doc]
             fn $method(self, rhs: E) -> Self::Output {
-                let e_rhs = rhs.into();
-                let gs = self.grade_set().clone().$method(e_rhs.grade_set().clone());
-                Self::new(gs, N::GeometricProduct(OnceCell::new(), self, e_rhs))
+                self.product(rhs.into(), $fn)
             }
         }
         )*
@@ -135,11 +150,22 @@ macro_rules! gaexpr_products {
 }
 
 gaexpr_products! {
-    Mul mul "Geometric product",
-    BitXor bitxor "Outer product",
-    BitAnd bitand "Inner product",
-    Shl shl "Left contraction",
-    Shr shr "Right contraction"
+    "Geometric product" Mul mul
+        (|k1, k2| GradeSet::single(k1) * GradeSet::single(k2)),
+    "Outer product" BitXor bitxor
+        (|k1, k2| GradeSet::single(k1 + k2)),
+    "Inner product" BitAnd bitand
+        (|k1, k2| {
+            if k1 == 0 || k2 == 0 {
+                GradeSet::empty()
+            } else {
+                GradeSet::single((k1 - k2).abs())
+            }
+        }),
+    "Left contraction" Shl shl
+        (|k1, k2| GradeSet::single(k2 - k1)),
+    "Right contraction" Shr shr
+        (|k1, k2| GradeSet::single(k1 - k2))
 }
 
 impl<T> std::ops::Neg for GaExpr<T> {
@@ -258,14 +284,37 @@ impl<T> GaExpr<T> {
         })
     }
 
-    /// Raise to some power. Shortcut for `exp(log(self) * p)`, usually with `p`
-    /// evaluating to a scalar. Therefore, please refer to [`Self::log`] and
-    /// [`Self::exp`] for limitations
+    /// Compute a product (based on the geometric product) of two operands,
+    /// given a function that will select grades from the result of each
+    /// individual k-vector to g-vector product
+    pub fn product(
+        self,
+        rhs: Self,
+        grades_to_select: impl Fn(i64, i64) -> GradeSet + 'static,
+    ) -> Self {
+        let gs = self
+            .grade_set()
+            .sum_map_cartesian_product(&rhs.grade_set(), &grades_to_select);
+        Self::new(
+            gs,
+            N::Product(Product {
+                comp_muls_cell: OnceCell::new(),
+                grades_to_select: KVecsProductGradeProj(Box::new(move |k1, k2| {
+                    grades_to_select(k1, k2)
+                })),
+                left_expr: self,
+                right_expr: rhs,
+            }),
+        )
+    }
+
+    /// Raise to some power. Shortcut for `exp(log(self) * p)`. Therefore,
+    /// please refer to [`Self::log`] and [`Self::exp`] for limitations
     pub fn pow(self, p: impl Into<GaExpr<T>>) -> Self {
         GaExpr::exp(GaExpr::log(self) * p)
     }
 
-    // Square root
+    /// Square root
     pub fn sqrt(self) -> Self
     where
         T: GradedDataMut,
@@ -287,7 +336,7 @@ impl<T> GaExpr<T> {
     pub fn gselect(self, f: impl FnOnce(&GradeSet) -> GradeSet) -> Self {
         let wanted = f(&self.grade_set());
         let gs = self.grade_set().clone().intersection(wanted);
-        Self::new(gs.clone(), N::GradeProjection(self, gs))
+        Self::new(gs, N::GradeProjection(self))
     }
 
     /// Scalar product. Just a shortcut for `(self.rev() * rhs).g(0)`
@@ -320,13 +369,13 @@ impl<T> GaExpr<T> {
 
     /// Tells which algebra this [`GaExpr`] is using, and recursively propagates
     /// wanted grades downwards so as to evaluate for each sub-expression only
-    /// the grades that are necessary to compute the whole [`GaExpr`]
+    /// the grades that are necessary to compute the whole [`GaExpr`].
     ///
     /// The given [`MetricAlgebra`] must make sense with respect to the input
     /// values contained in the [`GaExpr`], in terms of possible grades
     /// contained in those input values, and of number of components for each
     /// grade
-    pub fn prepare(self, alg: &impl MetricAlgebra) -> ReadyGaExpr<T> {
+    pub fn specialize(self, alg: &impl MetricAlgebra) -> SpecializedGaExpr<T> {
         // The process is split in two because sub-expressions may be used at
         // several places in the AST. First we collect all the requirements for
         // expressions throughout the whole tree, and add them to the minimal
@@ -335,7 +384,7 @@ impl<T> GaExpr<T> {
         // Then for each node we apply and store at each node what is needed
         // from the algebra:
         self.rec_apply_algebra(alg);
-        // GaExpr<T> and ReadyGaExpr<T> have the exact same memory
+        // GaExpr<T> and SpecializedGaExpr<T> have the exact same memory
         // representation, therefore this is safe:
         unsafe { std::mem::transmute(self) }
     }
@@ -350,25 +399,33 @@ impl<T> GaExpr<T> {
             .replace_with(|old| old.clone() + wanted.clone());
         match &self.rc.ast_node {
             N::GradedObj(_) => {}
-            N::GradeProjection(e, _)
+            N::GradeProjection(e)
             | N::Negation(e)
             | N::Reverse(e)
             | N::GradeInvolution(e)
             | N::ScalarUnaryOp(_, e) => {
                 e.rec_update_minimal_grade_sets(wanted);
             }
-            N::Addition(e1, e2) => {
+            N::Addition(left_expr, right_expr) => {
                 // <A + B>_k = <A>_k + <B>_k
-                e1.rec_update_minimal_grade_sets(wanted);
-                e2.rec_update_minimal_grade_sets(wanted);
+                left_expr.rec_update_minimal_grade_sets(wanted);
+                right_expr.rec_update_minimal_grade_sets(wanted);
             }
-            N::GeometricProduct(_, e1, e2) => {
+            N::Product(Product {
+                left_expr,
+                right_expr,
+                grades_to_select,
+                ..
+            }) => {
                 // Find in e1 and e2 which grades, once multiplied, will affect
                 // the grades in `wanted`
-                let (e1_wanted, e2_wanted) =
-                    wanted.parts_contributing_to_gp(&e1.grade_set(), &e2.grade_set());
-                e1.rec_update_minimal_grade_sets(&e1_wanted);
-                e2.rec_update_minimal_grade_sets(&e2_wanted);
+                let (left_wanted_gs, right_wanted_gs) = wanted.parts_contributing_to_product(
+                    &grades_to_select.0,
+                    &left_expr.grade_set(),
+                    &right_expr.grade_set(),
+                );
+                left_expr.rec_update_minimal_grade_sets(&left_wanted_gs);
+                right_expr.rec_update_minimal_grade_sets(&right_wanted_gs);
             }
             N::Exponential(e) => e.rec_update_minimal_grade_sets(&wanted.clone().log()),
             N::Logarithm(e) => e.rec_update_minimal_grade_sets(&wanted.clone().exp()),
@@ -392,16 +449,12 @@ impl<T> GaExpr<T> {
             // other part of the AST
             return;
         }
-        self.restrict_minimal_grade_set(
-            self.rc
-                .maximal_grade_set
-                .clone()
-                .intersection(alg.full_grade_set()),
-        );
+        self.restrict_minimal_grade_set(alg.full_grade_set());
+        self.restrict_minimal_grade_set(self.rc.maximal_grade_set.clone());
         match &self.rc.ast_node {
             N::GradedObj(_) => {}
             N::Negation(e)
-            | N::GradeProjection(e, _)
+            | N::GradeProjection(e)
             | N::Reverse(e)
             | N::GradeInvolution(e)
             | N::ScalarUnaryOp(_, e) => {
@@ -416,32 +469,45 @@ impl<T> GaExpr<T> {
                 e.rec_apply_algebra(alg);
                 self.restrict_minimal_grade_set(e.minimal_grade_set().clone().log())
             }
-            N::Addition(e_left, e_right) => {
-                e_left.rec_apply_algebra(alg);
-                e_right.rec_apply_algebra(alg);
+            N::Addition(left, right) => {
+                left.rec_apply_algebra(alg);
+                right.rec_apply_algebra(alg);
                 self.restrict_minimal_grade_set(
-                    e_left.minimal_grade_set().clone() + e_right.minimal_grade_set().clone(),
+                    left.minimal_grade_set().clone() + right.minimal_grade_set().clone(),
                 );
             }
-            N::GeometricProduct(comp_muls_cell, e_left, e_right) => {
-                e_left.rec_apply_algebra(alg);
-                e_right.rec_apply_algebra(alg);
+            N::Product(Product {
+                comp_muls_cell,
+                left_expr,
+                right_expr,
+                grades_to_select,
+            }) => {
+                left_expr.rec_apply_algebra(alg);
+                right_expr.rec_apply_algebra(alg);
                 self.restrict_minimal_grade_set(
-                    e_left.minimal_grade_set().clone() * e_right.minimal_grade_set().clone(),
+                    left_expr.minimal_grade_set().sum_map_cartesian_product(
+                        &right_expr.minimal_grade_set(),
+                        &grades_to_select.0,
+                    ),
                 );
-                // Now that the grades at play for this geometric product are
-                // fully resolved, we can construct the set of
-                // component-to-component multiplications that will be needed to
-                // perform it:
+                // Now that the grades at play for this product are fully
+                // resolved, we can construct the set of component-to-component
+                // multiplications that will be needed to perform it:
                 comp_muls_cell
                     .set(
-                        iter_individual_comp_muls(
-                            alg,
-                            &self.minimal_grade_set(),
-                            &e_left.minimal_grade_set(),
-                            &e_right.minimal_grade_set(),
-                        )
-                        .collect(),
+                        self.minimal_grade_set()
+                            .iter_contribs_to_product(
+                                &grades_to_select.0,
+                                &left_expr.minimal_grade_set(),
+                                &right_expr.minimal_grade_set(),
+                            )
+                            .flat_map(|individual_grades_and_contribs| {
+                                iter_comp_muls_for_kvectors_prod(
+                                    alg,
+                                    individual_grades_and_contribs,
+                                )
+                            })
+                            .collect(),
                     )
                     .expect("IndividualCompMul cell has already been set");
             }
@@ -449,38 +515,33 @@ impl<T> GaExpr<T> {
     }
 }
 
-fn iter_individual_comp_muls<'a>(
-    alg: &'a impl MetricAlgebra,
-    gs_product: &'a GradeSet,
-    gs_left: &'a GradeSet,
-    gs_right: &'a GradeSet,
-) -> impl Iterator<Item = IndividualCompMul> + 'a {
-    gs_product
-        .iter_contribs_to_gp(gs_left, gs_right)
-        .flat_map(move |(_, k_left, k_right)| {
-            iter_basis_blades_of_grade(alg, k_left).flat_map(move |bb_left| {
-                iter_basis_blades_of_grade(alg, k_right).filter_map(move |bb_right| {
-                    let (bb_res, coeff) = alg.ortho_basis_blades_gp(&bb_left, &bb_right);
-                    let result_comp = alg.basis_blade_to_component(&bb_res);
-                    if gs_product.contains(result_comp.grade) {
-                        Some(IndividualCompMul {
-                            left_comp: alg.basis_blade_to_component(&bb_left),
-                            right_comp: alg.basis_blade_to_component(&bb_right),
-                            result_comp,
-                            coeff,
-                        })
-                    } else {
-                        None
-                    }
+fn iter_comp_muls_for_kvectors_prod(
+    alg: &impl MetricAlgebra,
+    (k_left, k_right, contribs): (usize, usize, GradeSet),
+) -> impl Iterator<Item = IndividualCompMul> + '_ {
+    iter_basis_blades_of_grade(alg, k_left).flat_map(move |bb_left| {
+        let contribs = contribs.clone();
+        iter_basis_blades_of_grade(alg, k_right).filter_map(move |bb_right| {
+            let (bb_res, coeff) = alg.ortho_basis_blades_gp(&bb_left, &bb_right);
+            let result_comp = alg.basis_blade_to_component(&bb_res);
+            if contribs.contains(result_comp.grade) {
+                Some(IndividualCompMul {
+                    left_comp: alg.basis_blade_to_component(&bb_left),
+                    right_comp: alg.basis_blade_to_component(&bb_right),
+                    result_comp,
+                    coeff,
                 })
-            })
+            } else {
+                None
+            }
         })
+    })
 }
 
 /// A [`GaExpr`] which is ready for compilation/evaluation
 #[derive(Debug)]
 #[repr(transparent)]
-pub struct ReadyGaExpr<T> {
+pub struct SpecializedGaExpr<T> {
     rc: Rc<GradedNode<Self, T>>,
 }
 
@@ -492,7 +553,7 @@ pub struct ExprId(
     *const (),
 );
 
-impl<T> ReadyGaExpr<T> {
+impl<T> SpecializedGaExpr<T> {
     /// Whether that expression is used several times and could benefit from
     /// caching when evaluated
     pub fn is_reused(&self) -> bool {
@@ -506,7 +567,7 @@ impl<T> ReadyGaExpr<T> {
     }
 
     /// Get the node and the part of the AST it contains
-    pub fn ast_node(&self) -> &AstNode<ReadyGaExpr<T>, T> {
+    pub fn ast_node(&self) -> &AstNode<SpecializedGaExpr<T>, T> {
         &self.rc.ast_node
     }
 
@@ -521,8 +582,8 @@ impl<T> ReadyGaExpr<T> {
 }
 
 /// Get the minimal [`GradeSet`] inferred for this expression, and constrained
-/// to what is available in the algebra given to [`GaExpr::prepare`]
-impl<T> Graded for ReadyGaExpr<T> {
+/// to what is available in the algebra given to [`GaExpr::specialize`]
+impl<T> Graded for SpecializedGaExpr<T> {
     type RefToGradeSet<'a> = Ref<'a, GradeSet> where T: 'a;
     fn grade_set(&self) -> Self::RefToGradeSet<'_> {
         // This corresponds to GaExpr::minimal_grade_set
