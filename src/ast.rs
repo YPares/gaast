@@ -46,7 +46,7 @@ pub enum AstNode<E, T> {
 #[derive(Debug)]
 pub struct Product<E> {
     pub comp_muls_cell: OnceCell<Vec<IndividualCompMul>>,
-    grades_to_select: KVecsProductGradeProj,
+    grades_to_produce: KVecsProductGradeSelection,
     pub left_expr: E,
     pub right_expr: E,
 }
@@ -65,11 +65,14 @@ pub struct IndividualCompMul {
     pub coeff: f64,
 }
 
-struct KVecsProductGradeProj(Box<dyn Fn(i64, i64) -> GradeSet>);
+/// When two k-vectors are multiplied together, select --given their grades--
+/// which grades should be retained out of their geometric product. Is called
+/// only during AST specialization phase
+struct KVecsProductGradeSelection(Box<dyn Fn((i64, i64)) -> GradeSet>);
 
-impl Debug for KVecsProductGradeProj {
+impl Debug for KVecsProductGradeSelection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("<ProductGradeSelectionFn>")
+        f.write_str("<KVecsProductGradeSelection>")
     }
 }
 
@@ -151,11 +154,11 @@ macro_rules! gaexpr_products {
 
 gaexpr_products! {
     "Geometric product" Mul mul
-        (|k1, k2| GradeSet::single(k1) * GradeSet::single(k2)),
+        (|(k1, k2)| GradeSet::single(k1) * GradeSet::single(k2)),
     "Outer product" BitXor bitxor
-        (|k1, k2| GradeSet::single(k1 + k2)),
+        (|(k1, k2)| GradeSet::single(k1 + k2)),
     "Inner product" BitAnd bitand
-        (|k1, k2| {
+        (|(k1, k2)| {
             if k1 == 0 || k2 == 0 {
                 GradeSet::empty()
             } else {
@@ -163,9 +166,9 @@ gaexpr_products! {
             }
         }),
     "Left contraction" Shl shl
-        (|k1, k2| GradeSet::single(k2 - k1)),
+        (|(k1, k2)| GradeSet::single(k2 - k1)),
     "Right contraction" Shr shr
-        (|k1, k2| GradeSet::single(k1 - k2))
+        (|(k1, k2)| GradeSet::single(k1 - k2))
 }
 
 impl<T> std::ops::Neg for GaExpr<T> {
@@ -290,18 +293,16 @@ impl<T> GaExpr<T> {
     pub fn product(
         self,
         rhs: Self,
-        grades_to_select: impl Fn(i64, i64) -> GradeSet + 'static,
+        grades_to_produce: impl Fn((i64, i64)) -> GradeSet + 'static,
     ) -> Self {
-        let gs = self
-            .grade_set()
-            .sum_map_cartesian_product(&rhs.grade_set(), &grades_to_select);
+        let gs = iter_grade_sets_cp(self.grade_set(), rhs.grade_set())
+            .map(&grades_to_produce)
+            .collect();
         Self::new(
             gs,
             N::Product(Product {
                 comp_muls_cell: OnceCell::new(),
-                grades_to_select: KVecsProductGradeProj(Box::new(move |k1, k2| {
-                    grades_to_select(k1, k2)
-                })),
+                grades_to_produce: KVecsProductGradeSelection(Box::new(grades_to_produce)),
                 left_expr: self,
                 right_expr: rhs,
             }),
@@ -418,13 +419,13 @@ impl<T> GaExpr<T> {
             N::Product(Product {
                 left_expr,
                 right_expr,
-                grades_to_select,
+                grades_to_produce,
                 ..
             }) => {
-                // Find in e1 and e2 which grades, once multiplied, will affect
-                // the grades in `wanted`
+                // Find in left_expr and right_expr which grades, once
+                // multiplied, will affect the grades in `wanted`
                 let (left_wanted_gs, right_wanted_gs) = wanted.parts_contributing_to_product(
-                    &grades_to_select.0,
+                    &grades_to_produce.0,
                     &left_expr.grade_set(),
                     &right_expr.grade_set(),
                 );
@@ -470,26 +471,28 @@ impl<T> GaExpr<T> {
                 e.rec_apply_algebra(alg);
                 self.restrict_minimal_grade_set(e.minimal_grade_set().clone());
             }
-            N::Addition(left, right) => {
-                left.rec_apply_algebra(alg);
-                right.rec_apply_algebra(alg);
+            N::Addition(left_expr, right_expr) => {
+                left_expr.rec_apply_algebra(alg);
+                right_expr.rec_apply_algebra(alg);
                 self.restrict_minimal_grade_set(
-                    left.minimal_grade_set().clone() + right.minimal_grade_set().clone(),
+                    left_expr.minimal_grade_set().clone() + right_expr.minimal_grade_set().clone(),
                 );
             }
             N::Product(Product {
                 comp_muls_cell,
                 left_expr,
                 right_expr,
-                grades_to_select,
+                grades_to_produce,
             }) => {
                 left_expr.rec_apply_algebra(alg);
                 right_expr.rec_apply_algebra(alg);
                 self.restrict_minimal_grade_set(
-                    left_expr.minimal_grade_set().sum_map_cartesian_product(
+                    iter_grade_sets_cp(
+                        &left_expr.minimal_grade_set(),
                         &right_expr.minimal_grade_set(),
-                        &grades_to_select.0,
-                    ),
+                    )
+                    .map(&grades_to_produce.0)
+                    .collect(),
                 );
                 // Now that the grades at play for this product are fully
                 // resolved, we can construct the set of component-to-component
@@ -498,7 +501,7 @@ impl<T> GaExpr<T> {
                     .set(
                         self.minimal_grade_set()
                             .iter_contribs_to_product(
-                                &grades_to_select.0,
+                                &grades_to_produce.0,
                                 &left_expr.minimal_grade_set(),
                                 &right_expr.minimal_grade_set(),
                             )

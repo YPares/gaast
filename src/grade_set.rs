@@ -201,26 +201,6 @@ impl GradeSet {
         self.bv.last_one()
     }
 
-    /// For each grade k in self and each grade g in other, yield (k,g)
-    pub fn iter_cartesian_product<'a>(
-        &'a self,
-        other: &'a Self,
-    ) -> impl Iterator<Item = (i64, i64)> + Clone + 'a {
-        self.iter()
-            .flat_map(move |kl| other.iter().map(move |kr| (kl as i64, kr as i64)))
-    }
-
-    // Apply a function to each pair of the cartesian product of 2 grade sets
-    pub fn sum_map_cartesian_product(
-        &self,
-        other: &Self,
-        mut f: impl FnMut(i64, i64) -> GradeSet,
-    ) -> GradeSet {
-        self.iter_cartesian_product(&other)
-            .map(|(k1, k2)| f(k1, k2))
-            .fold(GradeSet::empty(), |acc, x| acc + x)
-    }
-
     /// Using `self` as some product result, yields all the pairs of grades in
     /// `left` and `right` that will, when multiplied, contribute to at least
     /// one of the grades contained in self.
@@ -228,39 +208,38 @@ impl GradeSet {
     /// Each element yielded is of the form (grade_in_left, grade_in_right,
     /// grades_in_self_contributed_to)
     ///
-    /// The `grade_selection_fn` param defines which product is used: for each
+    /// The `grades_to_produce` param defines which product is used: for each
     /// individual k-vector to g-vector product in inputs, it must return the
     /// grades we want out of this product
     ///
     /// Greedy O(N^2) implementation
     pub fn iter_contribs_to_product<'a>(
         &'a self,
-        grade_selection_fn: impl Fn(i64, i64) -> GradeSet + 'a,
+        grades_to_produce: impl Fn((i64, i64)) -> GradeSet + 'a,
         left: &'a Self,
         right: &'a Self,
     ) -> impl Iterator<Item = (Grade, Grade, GradeSet)> + 'a {
-        left.iter_cartesian_product(right)
-            .filter_map(move |(kl, kr)| {
-                let contribs = self.clone().intersection(grade_selection_fn(kl, kr));
-                if !contribs.is_empty() {
-                    Some((kl as usize, kr as usize, contribs))
-                } else {
-                    None
-                }
-            })
+        iter_grade_sets_cp(left, right).filter_map(move |tup| {
+            let contribs = self.clone().intersection(grades_to_produce(tup));
+            if !contribs.is_empty() {
+                Some((tup.0 as usize, tup.1 as usize, contribs))
+            } else {
+                None
+            }
+        })
     }
 
     /// Uses [`Self::iter_contribs_to_product`] to collect
     /// (contributing_grades_in_left, contributing_grades_in_right)
     pub fn parts_contributing_to_product<'a>(
         &'a self,
-        grade_selection_fn: impl Fn(i64, i64) -> GradeSet + 'a,
+        grades_to_produce: impl Fn((i64, i64)) -> GradeSet + 'a,
         left: &'a Self,
         right: &'a Self,
     ) -> (Self, Self) {
         let mut filtered_left = GradeSet::empty();
         let mut filtered_right = GradeSet::empty();
-        for (k_left, k_right, _) in self.iter_contribs_to_product(grade_selection_fn, left, right) {
+        for (k_left, k_right, _) in self.iter_contribs_to_product(grades_to_produce, left, right) {
             filtered_left = filtered_left.add_grade(k_left);
             filtered_right = filtered_right.add_grade(k_right);
         }
@@ -271,6 +250,22 @@ impl GradeSet {
     pub(crate) fn id(self) -> Self {
         self
     }
+}
+
+impl FromIterator<GradeSet> for GradeSet {
+    fn from_iter<T: IntoIterator<Item = GradeSet>>(iter: T) -> Self {
+        iter.into_iter().fold(Self::empty(), |acc, x| acc + x)
+    }
+}
+
+/// Cartesian product of two GradeSets: for each grade k in left and each grade
+/// g in right, yield (k,g)
+pub fn iter_grade_sets_cp<'a>(
+    left: &'a GradeSet,
+    right: &'a GradeSet,
+) -> impl Iterator<Item = (i64, i64)> + Clone + 'a {
+    left.iter()
+        .flat_map(move |kl| right.iter().map(move |kr| (kl as i64, kr as i64)))
 }
 
 fn sort_by_len<T>(v1: T, v2: T) -> (T, T)
@@ -353,13 +348,13 @@ mod tests {
         iter_grades: (S(1) + S(22) + S(10)).iter().collect::<Vec<_>>() => vec![1,10,22],
         parts_contributing_to_geom_prod:
             S(0).parts_contributing_to_product(
-                |k1, k2| GradeSet::single(k1) * GradeSet::single(k2),
+                |(k1, k2)| GradeSet::single(k1) * GradeSet::single(k2),
                 &(S(1) + S(0) + S(2) + S(10)),
                 &(S(0) + S(2) + S(6))
             ) => (S(0) + S(2), S(0) + S(2)),
         parts_contributing_to_outer_prod:
             S(4).parts_contributing_to_product(
-                |k1, k2| GradeSet::single(k1 + k2),
+                |(k1, k2)| GradeSet::single(k1 + k2),
                 &(S(1) + S(0) + S(2) + S(10)),
                 &(S(0) + S(2) + S(3))
             ) => (S(1) + S(2), S(2) + S(3))
