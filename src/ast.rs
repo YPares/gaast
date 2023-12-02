@@ -350,9 +350,8 @@ impl<T> GaExpr<T> {
         self.rev().ginvol()
     }
 
-    /// Inverse. In the case of a multivector, is just a shortcut for
-    /// `self.clone().rev() * self.norm_sq().inv()`. If self is just a scalar,
-    /// it will compute its regular inverse
+    /// If self evaluates to a scalar, it computes its regular inverse. Else, it
+    /// does `self.clone().rev() * self.norm_sq().inv()`
     pub fn inv(self) -> Self {
         if self.grade_set().is_just(0) {
             // Regular scalar inversion
