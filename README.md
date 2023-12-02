@@ -54,8 +54,6 @@ for expressions evaluating to versors._
   intermediary allocations are needed), because the advantage of such caching
   for operations that don't require intermediary allocations (sums, reverse,
   grade involutions...) isn't clear.
-- Unit testing of the grade inference logic and of the evaluation of some basic
-  expressions in EGA3
 
 Quite a few implementation ideas are taken from the book _"Geometric Algebra for
 Computer Science"_, by Leo Dorst, Daniel Fontijne and Stephen Mann.

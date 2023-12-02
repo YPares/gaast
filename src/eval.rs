@@ -148,6 +148,6 @@ mod tests {
         let v = e1.clone() + e2.clone();
         let bv = 4 * e1 ^ e3;
         // project v onto bv:
-        expr_eq!(EGA3, (v & bv.clone()) & bv.inv(), grade_map_mv!(1 => 1 0 0));
+        expr_eq!(EGA3, (v & bv.clone()) & bv.vinv(), grade_map_mv!(1 => 1 0 0));
     }
 }

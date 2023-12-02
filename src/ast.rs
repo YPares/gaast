@@ -350,16 +350,21 @@ impl<T> GaExpr<T> {
         self.rev().ginvol()
     }
 
-    /// If self evaluates to a scalar, it computes its regular inverse. Else, it
-    /// does `self.clone().rev() * self.norm_sq().inv()`
-    pub fn inv(self) -> Self {
+    /// Versor inverse. Just a shortcut for `self.clone().rev() *
+    /// self.norm_sq().sinv()`. Will default to [`Self::sinv`] when self is just a
+    /// scalar
+    pub fn vinv(self) -> Self {
         if self.grade_set().is_just(0) {
-            // Regular scalar inversion
-            let gs = self.grade_set().clone();
-            Self::new(gs, N::ScalarUnaryOp(ScalarUnaryOp::Inversion, self))
+            self.sinv()
         } else {
-            self.clone().rev() * self.norm_sq().inv()
+            self.clone().rev() * self.norm_sq().sinv()
         }
+    }
+
+    /// Inverts only the scalar part
+    pub fn sinv(self) -> Self {
+        let gs = self.grade_set().clone();
+        Self::new(gs, N::ScalarUnaryOp(ScalarUnaryOp::Inversion, self))
     }
 
     /// Norm squared. Just a shortcut for `(self.clone().rev() * self).g(0)`
