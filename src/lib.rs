@@ -1,8 +1,8 @@
 //! # Geometric Algebra Abstract Syntax Tree
 //!
 //! Contruct geometric algebra expressions and perform grade inference on them,
-//! in order to limit computations and RAM usage to only what is needed to get
-//! the wanted result. The main type to build and combine these expressions is
+//! in order to limit allocations and computations to what is needed to get the
+//! wanted result. The main type to build and combine these expressions is
 //! [`GaExpr`], which exposes methods for the geometric algebra primitives.
 //!
 //! [`GaExpr`] is agnostic over which types are actually used to store input and
