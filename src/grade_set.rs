@@ -172,6 +172,11 @@ impl GradeSet {
         self
     }
 
+    /// Stores in self the intersection of self and gs
+    pub fn restrict_to(&mut self, gs: GradeSet) {
+        self.bv &= gs.bv;
+    }
+
     /// Exponential. Is defined only for **single**-graded k-vectors
     pub fn exp(self) -> Self {
         assert!(
@@ -284,6 +289,13 @@ impl std::ops::Add for GradeSet {
     fn add(self, rhs: Self) -> Self::Output {
         let (small, big) = sort_by_len(self.bv, rhs.bv);
         GradeSet { bv: big | small }
+    }
+}
+
+impl std::ops::AddAssign for GradeSet {
+    fn add_assign(&mut self, rhs: Self) {
+        // Using |= won't work, as self may be smaller than rhs
+        *self = self.clone() + rhs;
     }
 }
 

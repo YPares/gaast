@@ -7,55 +7,57 @@ use AstNode as N;
 
 type Cache<R> = HashMap<ExprId, R>;
 
-impl<T: GradedData> SpecializedGaExpr<T> {
+impl<T: GradedData + std::fmt::Debug> SpecializedGaExpr<T> {
     /// Evaluates a [`GaExpr`]
     pub fn eval<R>(&self) -> R
     where
         R: GradedDataMut + Clone,
     {
-        self.eval_with_cache(&mut HashMap::new())
+        self.eval_with_cache(self.root(), &mut HashMap::new())
     }
 
-    fn eval_with_cache<R>(&self, cache: &mut Cache<R>) -> R
+    fn eval_with_cache<R>(&self, this_id: ExprId, cache: &mut Cache<R>) -> R
     where
         R: GradedDataMut + Clone,
     {
-        if self.is_reused() {
-            match cache.get(&self.identify()) {
+        let this = self.get_node(this_id);
+        if this.is_used_several_times() {
+            match cache.get(&this_id) {
                 Some(r) => r.clone(),
                 None => {
-                    let mut res = R::init_null_mv(self.vec_space_dim(), &self.grade_set());
-                    self.add_to_res(cache, &mut res);
-                    cache.insert(self.identify(), res.clone());
+                    let mut res = R::init_null_mv(this.vec_space_dim(), this.grade_set());
+                    self.add_to_res(this_id, cache, &mut res);
+                    cache.insert(this_id, res.clone());
                     res
                 }
             }
         } else {
-            let mut res = R::init_null_mv(self.vec_space_dim(), &self.grade_set());
-            self.add_to_res(cache, &mut res);
+            let mut res = R::init_null_mv(this.vec_space_dim(), this.grade_set());
+            self.add_to_res(this_id, cache, &mut res);
             res
         }
     }
 
-    fn add_to_res<R>(&self, cache: &mut Cache<R>, res: &mut R)
+    fn add_to_res<R>(&self, this_id: ExprId, cache: &mut Cache<R>, res: &mut R)
     where
         R: GradedDataMut + Clone,
     {
-        if self.grade_set().is_empty() {
+        let this = self.get_node(this_id);
+        if this.grade_set().is_empty() {
             // self necessarily evaluates to zero, no need to go further
             return;
         }
-        match self.ast_node() {
+        match this.ast_node() {
             N::GradedObj(input) => {
-                res.add_grades_from(input, &self.grade_set());
+                res.add_grades_from(input, this.grade_set());
             }
             N::Addition(left_expr, right_expr) => {
-                left_expr.add_to_res(cache, res);
-                right_expr.add_to_res(cache, res);
+                self.add_to_res(*left_expr, cache, res);
+                self.add_to_res(*right_expr, cache, res);
             }
             N::Negation(e) => {
-                e.add_to_res(cache, res);
-                for k in self.grade_set().iter() {
+                self.add_to_res(*e, cache, res);
+                for k in this.grade_set().iter() {
                     res.negate_grade(k);
                 }
             }
@@ -65,10 +67,10 @@ impl<T: GradedData> SpecializedGaExpr<T> {
                 right_expr,
                 ..
             }) => {
-                let mv_left: R = left_expr.eval_with_cache(cache);
-                let mv_right: R = right_expr.eval_with_cache(cache);
+                let mv_left: R = self.eval_with_cache(*left_expr, cache);
+                let mv_right: R = self.eval_with_cache(*right_expr, cache);
                 for mul in comp_muls_cell
-                    .get()
+                    .as_ref()
                     .expect("IndividualCompMul cell has not been set")
                 {
                     let val_left = mv_left.grade_slice(mul.left_comp.grade)[mul.left_comp.index];
@@ -80,30 +82,30 @@ impl<T: GradedData> SpecializedGaExpr<T> {
                 }
             }
             N::Reverse(e) => {
-                e.add_to_res(cache, res);
-                for k in self.grade_set().iter() {
+                self.add_to_res(*e, cache, res);
+                for k in this.grade_set().iter() {
                     if (k * (k - 1) / 2) % 2 == 1 {
                         res.negate_grade(k);
                     }
                 }
             }
             N::GradeInvolution(e) => {
-                e.add_to_res(cache, res);
-                for k in self.grade_set().iter() {
+                self.add_to_res(*e, cache, res);
+                for k in this.grade_set().iter() {
                     if k % 2 == 1 {
                         res.negate_grade(k);
                     }
                 }
             }
             N::ScalarUnaryOp(op, e) => {
-                e.add_to_res(cache, res);
+                self.add_to_res(*e, cache, res);
                 let s = res.grade_slice_mut(0);
                 s[0] = match op {
                     ScalarUnaryOp::Inversion => 1.0 / s[0],
                     ScalarUnaryOp::SquareRoot => s[0].sqrt(),
                 }
             }
-            N::GradeProjection(e) => e.add_to_res(cache, res),
+            N::GradeProjection(e) => self.add_to_res(*e, cache, res),
             N::Exponential(_e) => todo!(),
             N::Logarithm(_e) => todo!(),
         }
@@ -116,7 +118,9 @@ mod tests {
 
     macro_rules! expr_eq {
         ($alg:ident, $a:expr, $b:expr) => {
-            assert_eq!($a.specialize(&$alg).eval::<GradeMapMV>(), $b);
+            let expr = $a;
+            let specialized = expr.specialize(&$alg);
+            assert_eq!(specialized.eval::<GradeMapMV>(), $b);
         };
     }
 
