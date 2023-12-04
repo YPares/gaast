@@ -83,11 +83,6 @@ done:
   subexpressions will share the same identifier, which allows caching. Aside
   from this, the API should be pretty concise, and thanks to the genericity of
   Rust operators, the need for explicit casts should be limited.
-- For now, cloned subexpressions should ONLY be reused as subexpressions of the
-  SAME final expression, they should NOT be used in different expressions that
-  will end up being specialized and evaluated separately. This is because, for
-  now, the `GaExpr` and `SpecializedGaExpr` types simply share memory (so there
-  is aliasing).
 - Grade sets and basis blades are represented by dynamically-sized bitvectors
   (to be agnostic of vector space dimension), which are of course much slower
   than stack-allocated bitfields like `u64`. However, this bitvector

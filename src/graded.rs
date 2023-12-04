@@ -78,6 +78,17 @@ pub trait GradedDataMut: GradedData {
     }
 }
 
+impl<T: Graded> Graded for &T {
+    type RefToGradeSet<'a> = T::RefToGradeSet<'a> where Self: 'a;
+    fn grade_set(&self) -> Self::RefToGradeSet<'_> {
+        (**self).grade_set()
+    }
+}
+impl<T: GradedData> GradedData for &T {
+    fn grade_slice(&self, k: Grade) -> &[f64] {
+        (**self).grade_slice(k)
+    }
+}
 macro_rules! Graded_blanket_impls {
     ($($ref:tt),*) => {
         $(

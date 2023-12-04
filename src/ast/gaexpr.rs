@@ -1,10 +1,6 @@
 use super::base_types::{AstNode as N, *};
 use crate::{grade_set::*, graded::GradedDataMut, Graded};
-use std::{
-    cell::{OnceCell, RefCell},
-    fmt::Debug,
-    rc::Rc,
-};
+use std::{fmt::Debug, rc::Rc};
 
 /// Assign a [`GradeSet`] to some [`AstNode`]. This [`GradeSet`] can be modified
 /// to be restricted further depending on where this [`AstNode`] is being used,
@@ -14,11 +10,6 @@ pub(super) struct GradedNode<E, T> {
     /// The grade set inferred at AST construction (inferred from the maximal
     /// grade sets of this node's subexpressions)
     pub(super) maximal_grade_set: GradeSet,
-    /// Starting at empty, is updated during AST specialization, to finally
-    /// reflect on the minimal set of grades to allocate/compute at evaluation
-    pub(super) minimal_grade_set: RefCell<GradeSet>,
-    /// Starting at empty, is set during AST specialization given the algebra
-    pub(super) vec_space_dim: OnceCell<usize>,
     /// This node
     pub(super) ast_node: AstNode<E, T>,
 }
@@ -29,7 +20,6 @@ pub(super) struct GradedNode<E, T> {
 /// be further restrained depending on the use sites of this GaExpr, and then
 /// used to optimize allocations while evaluating the expression
 #[derive(Debug)]
-#[repr(transparent)]
 pub struct GaExpr<T> {
     pub(super) rc: Rc<GradedNode<Self, T>>,
 }
@@ -185,8 +175,6 @@ impl<T> GaExpr<T> {
         Self {
             rc: Rc::new(GradedNode {
                 maximal_grade_set: gs,
-                minimal_grade_set: RefCell::new(GradeSet::empty()),
-                vec_space_dim: OnceCell::new(),
                 ast_node,
             }),
         }
@@ -225,8 +213,8 @@ impl<T> GaExpr<T> {
         Self::new(
             gs,
             N::Product(Product {
-                comp_muls_cell: OnceCell::new(),
-                grades_to_produce: KVecsProductGradeSelection(Box::new(grades_to_produce)),
+                comp_muls_cell: None,
+                grades_to_produce: KVecsProductGradeSelection(Rc::new(grades_to_produce)),
                 left_expr: self,
                 right_expr: rhs,
             }),
