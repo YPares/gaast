@@ -4,9 +4,7 @@
 //! A [`MetricAlgebra`] additionally tells how these base vectors multiply under
 //! the dot product
 
-use crate::GradeSet;
-
-use super::grade_set::Grade;
+use crate::{Grade, GradeSet};
 use bitvec::prelude::*;
 
 // # TYPES & TRAITS //

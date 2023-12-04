@@ -2,7 +2,7 @@
 //! placeholders for graded data, and its subtypes to read and write grade
 //! components (slices)
 
-use super::{algebra::n_choose_k, grade_set::*};
+use crate::{algebra::n_choose_k, grade_set::*};
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 /// Just a newtype wrapper around any owned type, to provide a Deref
