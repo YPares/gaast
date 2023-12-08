@@ -6,7 +6,7 @@ use AstNode as N;
 /// Just an identifier. The container pointer is never dereferenced
 #[derive(Hash, PartialEq, Eq, Clone, Copy)]
 pub struct ExprId {
-    ptr: *const (),
+    pub(crate) ptr: *const (),
 }
 
 impl std::fmt::Debug for ExprId {

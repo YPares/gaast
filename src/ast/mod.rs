@@ -1,5 +1,6 @@
 mod base_types;
 mod gaexpr;
+mod gaexpr_cl;
 mod isolate;
 mod specialize;
 
