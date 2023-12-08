@@ -1,10 +1,7 @@
 mod base_types;
-mod gaexpr;
-mod gaexpr_cl;
-mod isolate;
+mod expr;
 mod specialize;
 
-pub use base_types::{AstNode, Product, ScalarUnaryOp};
-pub use gaexpr::{mv, GaExpr};
-pub use isolate::{ExprId, IsolatedNode};
-pub use specialize::SpecializedGaExpr;
+pub use base_types::{NodeId, GradedNode, AstNode, Product, ScalarUnaryOp};
+pub use expr::{mv, Expr};
+pub use specialize::SpecializedAst;

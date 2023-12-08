@@ -1,6 +1,6 @@
 # Geometric Algebra Abstract Syntax Tree
 
-Contruct geometric algebra expressions and perform grade inference on them,
+Construct geometric algebra expressions and perform grade inference on them,
 before direct evaluation or code generation, in order to limit allocations and
 computations to what is needed to get the wanted result. For instance, let's
 take the following expression:
@@ -14,13 +14,14 @@ literals. To evaluate $D$, we will only read, allocate or compute:
 - the parts of $A$ and $B$ which have a grade that will contribute to the grade
   2 part of the geometric product $AB$
 
-To do so, GA expressions are processed in three phases:
+To do so, GA expressions are processed in 4 phases:
 
-- 1: AST construction (declare input multivectors and combine them into an
-  expression with the provided operators)
-- 2: AST specialization (apply the metric, perform grade inference and resolve
-  individual component-to-component operations)
-- 3: AST evaluation (actually read the input data and run the operations
+- 1: Expression construction (declare input multivectors and combine them into
+  an expression with the provided operators)
+- 2: AST reification (provide the metric and get an actual mutable AST)
+- 3: AST specialization (perform grade inference and resolve individual
+  component-to-component operations)
+- 4: AST evaluation (actually read the input data and run the operations
   resolved at the previous steps)
 
 `gaast` is still pretty experimental. It aims at applications dealing with
@@ -66,7 +67,7 @@ done:
 ### Immediate roadmap
 
 - Versor exponentiation & logarithm
-- Change the inputs used by a SpecializedGaExpr (ie. re-using a "precompiled"
+- Change the inputs used by a SpecializedAst (ie. re-using a "precompiled"
   expression with different inputs that respect the same "schema"). It's doable
   right know by using a custom mutable datatype that implements the `Graded`
   trait, but a more convenient API should be built
@@ -86,7 +87,7 @@ done:
 - Grade sets and basis blades are represented by dynamically-sized bitvectors
   (to be agnostic of vector space dimension), which are of course much slower
   than stack-allocated bitfields like `u64`. However, this bitvector
-  manipulation is limited to phases 1 & 2, so it should not impact the speed of
+  manipulation is limited to phases 1-2-3, so it should not impact the speed of
   the actual computations.
 - Multivectors are read and written in a "one array per grade" fashion. This
   imposes a dense storage whatever the grade. Enabling a sparse storage for some
@@ -94,7 +95,7 @@ done:
 
 ### Potential future work
 
-- JIT compilation of `SpecializedGaExpr`s with LLVM thanks to
+- JIT compilation of `SpecializedAst`s with LLVM thanks to
   https://github.com/TheDan64/inkwell (see e.g.
   https://createlang.rs/01_calculator/jit_intro.html)
 - Investigate opportunities for parallelization (eg. with

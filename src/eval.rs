@@ -5,18 +5,18 @@ use std::collections::HashMap;
 use crate::{ast::*, graded::*};
 use AstNode as N;
 
-type Cache<R> = HashMap<ExprId, R>;
+type Cache<R> = HashMap<NodeId, R>;
 
-impl<T: GradedData + std::fmt::Debug> SpecializedGaExpr<T> {
-    /// Evaluates a [`GaExpr`]
+impl<T: GradedData + std::fmt::Debug> SpecializedAst<T> {
+    /// Evaluates a [`SpecializedAst`]
     pub fn eval<R>(&self) -> R
     where
         R: GradedDataMut + Clone,
     {
-        self.eval_with_cache(self.root(), &mut HashMap::new())
+        self.eval_with_cache(self.root_id(), &mut HashMap::new())
     }
 
-    fn eval_with_cache<R>(&self, this_id: ExprId, cache: &mut Cache<R>) -> R
+    fn eval_with_cache<R>(&self, this_id: NodeId, cache: &mut Cache<R>) -> R
     where
         R: GradedDataMut + Clone,
     {
@@ -38,7 +38,7 @@ impl<T: GradedData + std::fmt::Debug> SpecializedGaExpr<T> {
         }
     }
 
-    fn add_to_res<R>(&self, this_id: ExprId, cache: &mut Cache<R>, res: &mut R)
+    fn add_to_res<R>(&self, this_id: NodeId, cache: &mut Cache<R>, res: &mut R)
     where
         R: GradedDataMut + Clone,
     {
@@ -62,16 +62,14 @@ impl<T: GradedData + std::fmt::Debug> SpecializedGaExpr<T> {
                 }
             }
             N::Product(Product {
-                comp_muls_cell,
+                individual_comp_muls,
                 left_expr,
                 right_expr,
                 ..
             }) => {
                 let mv_left: R = self.eval_with_cache(*left_expr, cache);
                 let mv_right: R = self.eval_with_cache(*right_expr, cache);
-                for mul in comp_muls_cell
-                    .as_ref()
-                    .expect("IndividualCompMul cell has not been set")
+                for mul in individual_comp_muls
                 {
                     let val_left = mv_left.grade_slice(mul.left_comp.grade)[mul.left_comp.index];
                     let val_right =
@@ -114,7 +112,7 @@ impl<T: GradedData + std::fmt::Debug> SpecializedGaExpr<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{algebra::OrthoEuclidN, grade_map_mv, graded::GradeMapMV, GaExpr};
+    use crate::{algebra::OrthoEuclidN, grade_map_mv, graded::GradeMapMV, Expr};
 
     macro_rules! expr_eq {
         ($alg:ident, $a:expr, $b:expr) => {
@@ -124,7 +122,7 @@ mod tests {
         };
     }
 
-    type E = GaExpr<GradeMapMV>;
+    type E = Expr<'static, GradeMapMV>;
     const EGA3: OrthoEuclidN = OrthoEuclidN(3);
     const PGA2: [f64; 3] = [0.0, 1.0, 1.0];
 

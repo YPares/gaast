@@ -1,65 +1,58 @@
-use super::{
-    base_types::*,
-    isolate::{ExprId, IsolatedGaExpr, IsolatedNode, NodeArena},
-};
+use super::base_types::*;
 use crate::{
     algebra::{iter_basis_blades_of_grade, MetricAlgebra},
     grade_set::*,
-    GaExpr, Graded,
+    Expr,
 };
 use AstNode as N;
 
-/// A [`GaExpr`][crate::GaExpr] which is ready for compilation/evaluation
+/// An [`Expr`][crate::Expr] which is ready for compilation/evaluation
 #[derive(Debug)]
-pub struct SpecializedGaExpr<T> {
-    e: IsolatedGaExpr<T>,
+pub struct SpecializedAst<T> {
+    ast: ReifiedAst<T>,
 }
 
-impl<T> SpecializedGaExpr<T> {
+impl<T> SpecializedAst<T> {
     /// The identifier of the root node of the expression
-    pub fn root(&self) -> ExprId {
-        self.e.root
+    pub fn root_id(&self) -> NodeId {
+        self.ast.root_id
     }
 
-    /// Get a node from its [`ExprId`]
-    pub fn get_node(&self, node_id: ExprId) -> &IsolatedNode<T> {
-        &self.e.arena[&node_id]
+    /// Get a node from its [`NodeId`]
+    pub fn get_node(&self, node_id: NodeId) -> &GradedNode<T> {
+        &self.ast.arena[&node_id]
     }
 }
 
-impl<T> GaExpr<T> {
-    /// Tells which algebra this [`GaExpr`] is using, and recursively propagates
+impl<'a, T: Clone> Expr<'a, T> {
+    /// Tells which algebra this [`Expr`] is using, and recursively propagates
     /// wanted grades downwards so as to evaluate for each sub-expression only
-    /// the grades that are necessary to compute the whole [`GaExpr`].
+    /// the grades that are necessary to compute the whole [`Expr`].
     ///
     /// The given [`MetricAlgebra`] must make sense with respect to the input
-    /// values contained in the [`GaExpr`], in terms of possible grades
+    /// values contained in the [`Expr`], in terms of possible grades
     /// contained in those input values, and of number of components for each
     /// grade
-    pub fn specialize(&self, alg: &impl MetricAlgebra) -> SpecializedGaExpr<&T> {
-        // First, we copy self into its own arena storage, so that if it uses
-        // subexpressions that are shared with other separate GaExprs, then it
-        // is safe to mutate them:
-        let mut e = self.isolate();
+    pub fn specialize(self, alg: &impl MetricAlgebra) -> SpecializedAst<T> {
+        // First, we reify the expression, to go from a closure-based repr to an
+        // actual tree stored in an arena
+        let mut e = self.reify(alg);
+        let root_gs = e.arena[&e.root_id].maximal_grade_set.clone();
         // Then the rest of the process is split in two because sub-expressions
         // may be used at several places in the AST. First we collect all the
         // requirements for expressions throughout the whole tree, and add them
         // to the minimal grade sets of the corresponding nodes:
-        rec_update_minimal_grade_sets(
-            &mut e.arena,
-            e.root,
-            self.grade_set().clone().intersection(alg.full_grade_set()),
-        );
+        rec_update_minimal_grade_sets(&mut e.arena, e.root_id, root_gs);
         // Then for each node we apply and store at each node what is needed
         // from the algebra:
-        rec_apply_algebra(&mut e.arena, e.root, alg);
-        SpecializedGaExpr { e }
+        rec_apply_algebra(&mut e.arena, e.root_id, alg);
+        SpecializedAst { ast: e }
     }
 }
 
 fn rec_update_minimal_grade_sets<T: Clone>(
     arena: &mut NodeArena<T>,
-    this_id: ExprId,
+    this_id: NodeId,
     wanted: GradeSet,
 ) {
     // Here, we know the resulting grade of the operation represented by the top
@@ -102,10 +95,10 @@ fn rec_update_minimal_grade_sets<T: Clone>(
 
 fn rec_apply_algebra<T: Clone>(
     arena: &mut NodeArena<T>,
-    this_id: ExprId,
+    this_id: NodeId,
     alg: &impl MetricAlgebra,
 ) {
-    if let Some(_) = arena[&this_id].vec_space_dim {
+    if arena[&this_id].is_ready {
         // Algebra has already been applied for this node (and its subnodes),
         // because it is referred to in at least one other part of the AST
         assert!(
@@ -116,8 +109,7 @@ fn rec_apply_algebra<T: Clone>(
     }
     {
         let this = arena.get_mut(&this_id).unwrap();
-        this.vec_space_dim = Some(alg.vec_space_dim());
-        this.minimal_grade_set.restrict_to(alg.full_grade_set());
+        this.is_ready = true;
         assert!(
             this.maximal_grade_set
                 .includes(this.minimal_grade_set.clone()),
@@ -132,26 +124,10 @@ fn rec_apply_algebra<T: Clone>(
         | N::GradeInvolution(e)
         | N::ScalarUnaryOp(_, e) => {
             rec_apply_algebra(arena, e, alg);
-            // We re-propagate upwards the grades, since the grades produced by
-            // each operation may have changed since we restricted the grades
-            // sets to what is possible in the algebra
-            let gs = arena[&e].minimal_grade_set.clone();
-            arena
-                .get_mut(&this_id)
-                .unwrap()
-                .minimal_grade_set
-                .restrict_to(gs);
         }
         N::Addition(left_expr, right_expr) => {
             rec_apply_algebra(arena, left_expr, alg);
             rec_apply_algebra(arena, right_expr, alg);
-            let gs = arena[&left_expr].minimal_grade_set.clone()
-                + arena[&right_expr].minimal_grade_set.clone();
-            arena
-                .get_mut(&this_id)
-                .unwrap()
-                .minimal_grade_set
-                .restrict_to(gs);
         }
         N::Product(p) => {
             rec_apply_algebra(arena, p.left_expr, alg);
@@ -167,35 +143,18 @@ fn rec_apply_algebra<T: Clone>(
                 })
                 .collect();
             let this = arena.get_mut(&this_id).unwrap();
-            this.minimal_grade_set.restrict_to(
-                iter_grade_sets_cp(&gs_left, &gs_right)
-                    .map(p.grades_to_produce.get_fn())
-                    .collect(),
-            );
             match &mut this.ast_node {
                 N::Product(p) => {
-                    p.comp_muls_cell = Some(comp_muls);
+                    p.individual_comp_muls = comp_muls;
                 }
                 _ => panic!("Should be a Product node"),
             };
         }
         N::Exponential(e) => {
             rec_apply_algebra(arena, e, alg);
-            let gs = arena[&e].minimal_grade_set.clone().exp();
-            arena
-                .get_mut(&this_id)
-                .unwrap()
-                .minimal_grade_set
-                .restrict_to(gs)
         }
         N::Logarithm(e) => {
             rec_apply_algebra(arena, e, alg);
-            let gs = arena[&e].minimal_grade_set.clone().log();
-            arena
-                .get_mut(&this_id)
-                .unwrap()
-                .minimal_grade_set
-                .restrict_to(gs)
         }
     }
 }
