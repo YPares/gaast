@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::{ast::*, graded::*};
+use crate::{ast::*, graded::*, GradeSet};
 use AstNode as N;
 
 type Cache<R> = HashMap<NodeId, R>;
@@ -11,36 +11,30 @@ impl<T: GradedData + std::fmt::Debug> SpecializedAst<T> {
     /// Evaluates a [`SpecializedAst`]
     pub fn eval<R>(&self) -> R
     where
-        R: GradedDataMut + Clone,
+        R: GradedDataMut,
     {
-        self.eval_with_cache(self.root_id(), &mut HashMap::new())
+        let mut cache = HashMap::new();
+        self.store_in_cache(self.root_id(), &mut cache);
+        return cache.remove(&self.root_id()).unwrap();
     }
 
-    fn eval_with_cache<R>(&self, this_id: NodeId, cache: &mut Cache<R>) -> R
+    fn store_in_cache<R>(&self, this_id: NodeId, cache: &mut Cache<R>)
     where
-        R: GradedDataMut + Clone,
+        R: GradedDataMut,
     {
         let this = self.get_node(this_id);
-        if this.is_used_several_times() {
-            match cache.get(&this_id) {
-                Some(r) => r.clone(),
-                None => {
-                    let mut res = R::init_null_mv(this.vec_space_dim(), this.grade_set());
-                    self.add_to_res(this_id, cache, &mut res);
-                    cache.insert(this_id, res.clone());
-                    res
-                }
-            }
-        } else {
-            let mut res = R::init_null_mv(this.vec_space_dim(), this.grade_set());
-            self.add_to_res(this_id, cache, &mut res);
-            res
+        if let None = cache.get(&this_id) {
+            cache.insert(
+                this_id,
+                R::init_null_mv(this.vec_space_dim(), this.grade_set()),
+            );
+            self.add_to_res(this_id, this_id, cache);
         }
     }
 
-    fn add_to_res<R>(&self, this_id: NodeId, cache: &mut Cache<R>, res: &mut R)
+    fn add_to_res<R>(&self, res_id: NodeId, this_id: NodeId, cache: &mut Cache<R>)
     where
-        R: GradedDataMut + Clone,
+        R: GradedDataMut,
     {
         let this = self.get_node(this_id);
         if this.grade_set().is_empty() {
@@ -49,16 +43,19 @@ impl<T: GradedData + std::fmt::Debug> SpecializedAst<T> {
         }
         match this.ast_node() {
             N::GradedObj(input) => {
-                res.add_grades_from(input, this.grade_set());
+                cache
+                    .get_mut(&res_id)
+                    .unwrap()
+                    .add_grades_from(input, this.grade_set());
             }
             N::Addition(left_expr, right_expr) => {
-                self.add_to_res(*left_expr, cache, res);
-                self.add_to_res(*right_expr, cache, res);
+                self.add_to_res(res_id, *left_expr, cache);
+                self.add_to_res(res_id, *right_expr, cache);
             }
             N::Negation(e) => {
-                self.add_to_res(*e, cache, res);
+                self.add_to_res(res_id, *e, cache);
                 for k in this.grade_set().iter() {
-                    res.negate_grade(k);
+                    cache.get_mut(&res_id).unwrap().negate_grade(k);
                 }
             }
             N::Product(Product {
@@ -67,43 +64,51 @@ impl<T: GradedData + std::fmt::Debug> SpecializedAst<T> {
                 right_expr,
                 ..
             }) => {
-                let mv_left: R = self.eval_with_cache(*left_expr, cache);
-                let mv_right: R = self.eval_with_cache(*right_expr, cache);
-                for mul in individual_comp_muls
-                {
-                    let val_left = mv_left.grade_slice(mul.left_comp.grade)[mul.left_comp.index];
-                    let val_right =
-                        mv_right.grade_slice(mul.right_comp.grade)[mul.right_comp.index];
+                self.store_in_cache(*left_expr, cache);
+                self.store_in_cache(*right_expr, cache);
+                // We move res out of the cache so we can mutate it:
+                let mut res = std::mem::replace(
+                    cache.get_mut(&res_id).unwrap(),
+                    R::init_null_mv(0, &GradeSet::empty()),
+                );
+                // Cache is thus only borrowed immutably:
+                let left = &cache[left_expr];
+                let right = &cache[right_expr];
+                for mul in individual_comp_muls {
+                    let val_left = left.grade_slice(mul.left_comp.grade)[mul.left_comp.index];
+                    let val_right = right.grade_slice(mul.right_comp.grade)[mul.right_comp.index];
                     let val_result =
                         &mut res.grade_slice_mut(mul.result_comp.grade)[mul.result_comp.index];
                     *val_result += val_left * val_right * mul.coeff;
                 }
+                // We move res back into the cache:
+                std::mem::swap(cache.get_mut(&res_id).unwrap(), &mut res);
             }
             N::Reverse(e) => {
-                self.add_to_res(*e, cache, res);
+                self.add_to_res(res_id, *e, cache);
                 for k in this.grade_set().iter() {
                     if (k * (k - 1) / 2) % 2 == 1 {
-                        res.negate_grade(k);
+                        cache.get_mut(&res_id).unwrap().negate_grade(k);
                     }
                 }
             }
             N::GradeInvolution(e) => {
-                self.add_to_res(*e, cache, res);
+                self.add_to_res(res_id, *e, cache);
                 for k in this.grade_set().iter() {
                     if k % 2 == 1 {
-                        res.negate_grade(k);
+                        cache.get_mut(&res_id).unwrap().negate_grade(k);
                     }
                 }
             }
             N::ScalarUnaryOp(op, e) => {
-                self.add_to_res(*e, cache, res);
-                let s = res.grade_slice_mut(0);
+                self.add_to_res(res_id, *e, cache);
+                let s = cache.get_mut(&res_id).unwrap().grade_slice_mut(0);
                 s[0] = match op {
                     ScalarUnaryOp::Inversion => 1.0 / s[0],
                     ScalarUnaryOp::SquareRoot => s[0].sqrt(),
                 }
             }
-            N::GradeProjection(e) => self.add_to_res(*e, cache, res),
+            N::GradeProjection(e) => self.add_to_res(res_id, *e, cache),
             N::Exponential(_e) => todo!(),
             N::Logarithm(_e) => todo!(),
         }

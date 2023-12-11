@@ -3,7 +3,7 @@
 //! components (slices)
 
 use crate::{algebra::n_choose_k, grade_set::*};
-use std::{collections::HashMap, rc::Rc, sync::Arc};
+use std::{borrow::Cow, collections::HashMap, rc::Rc, sync::Arc};
 
 /// Just a newtype wrapper around any owned type, to provide a Deref
 /// implementation that targets that type
@@ -89,6 +89,17 @@ impl<T: GradedData> GradedData for &T {
         (**self).grade_slice(k)
     }
 }
+impl<T: Graded + Clone> Graded for Cow<'_, T> {
+    type RefToGradeSet<'a> = Owned<GradeSet> where Self: 'a;
+    fn grade_set(&self) -> Self::RefToGradeSet<'_> {
+        Owned((**self).grade_set().clone())
+    }
+}
+impl<T: GradedData + Clone> GradedData for Cow<'_, T> {
+    fn grade_slice(&self, k: Grade) -> &[f64] {
+        (**self).grade_slice(k)
+    }
+}
 macro_rules! Graded_blanket_impls {
     ($($ref:tt),*) => {
         $(
@@ -117,6 +128,17 @@ impl<T: GradedDataMut> GradedDataMut for Box<T> {
     }
     fn negate_grade(&mut self, k: Grade) {
         (**self).negate_grade(k);
+    }
+}
+impl<T: GradedDataMut + Clone> GradedDataMut for Cow<'_, T> {
+    fn grade_slice_mut(&mut self, k: Grade) -> &mut [f64] {
+        self.to_mut().grade_slice_mut(k)
+    }
+    fn init_null_mv(vec_space_dim: usize, gs: &GradeSet) -> Self {
+        Cow::Owned(T::init_null_mv(vec_space_dim, gs))
+    }
+    fn negate_grade(&mut self, k: Grade) {
+        self.to_mut().negate_grade(k)
     }
 }
 
